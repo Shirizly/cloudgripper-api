@@ -1,8 +1,7 @@
 import argparse
 import logging
 import os
-import threading
-import time
+import asyncio
 import traceback
 from configparser import ConfigParser
 from typing import Optional, Tuple, Any, List
@@ -17,17 +16,13 @@ from library.rgb_object_tracker import all_objects_are_visible
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-STATE_LOCK = threading.Lock()
-BOTTOM_IMAGE_LOCK = threading.Lock()
-ERROR_EVENT = threading.Event()
+ERROR_EVENT = asyncio.Event()
 
 
 class SharedState:
     def __init__(self):
         self.state: RobotActivity = RobotActivity.STARTUP
         self.recorder: Optional[Recorder] = None
-        self.recorder_thread: Optional[threading.Thread] = None
-        self.bottom_image_thread: Optional[threading.Thread] = None
 
 
 shared_state = SharedState()
@@ -54,13 +49,6 @@ def handle_error(exception: Exception) -> None:
     ERROR_EVENT.set()
 
 
-def run_autograsper(autograsper: Autograsper, colors: List[str], block_heights: np.ndarray, config: dict) -> None:
-    try:
-        autograsper.run_grasping(colors, block_heights, config)
-    except Exception as e:
-        handle_error(e)
-
-
 def setup_recorder(output_dir: str, robot_idx: str, config: dict) -> Recorder:
     session_id = "test"
     camera_matrix = np.array(eval(config["camera"]["m"]))
@@ -69,41 +57,6 @@ def setup_recorder(output_dir: str, robot_idx: str, config: dict) -> Recorder:
     if not token:
         raise ValueError("ROBOT_TOKEN environment variable not set")
     return Recorder(session_id, output_dir, camera_matrix, distortion_coefficients, token, robot_idx)
-
-
-def run_recorder(recorder: Recorder) -> None:
-    try:
-        recorder.record()
-    except Exception as e:
-        handle_error(e)
-
-
-def monitor_state(autograsper: Autograsper, shared_state: SharedState) -> None:
-    try:
-        while not ERROR_EVENT.is_set():
-            with STATE_LOCK:
-                if shared_state.state != autograsper.state:
-                    shared_state.state = autograsper.state
-                    if shared_state.state == RobotActivity.FINISHED:
-                        break
-            time.sleep(0.1)
-    except Exception as e:
-        handle_error(e)
-
-
-def is_stacking_successful(recorder: Recorder, colors: List[str]) -> bool:
-    return not all_objects_are_visible(colors, recorder.bottom_image, debug=False)
-
-
-def monitor_bottom_image(recorder: Recorder, autograsper: Autograsper) -> None:
-    try:
-        while not ERROR_EVENT.is_set():
-            if recorder and recorder.bottom_image is not None:
-                with BOTTOM_IMAGE_LOCK:
-                    autograsper.bottom_image = np.copy(recorder.bottom_image)
-            time.sleep(0.1)
-    except Exception as e:
-        handle_error(e)
 
 
 def create_new_data_point(script_dir: str) -> Tuple[str, str, str]:
@@ -138,25 +91,43 @@ def initialize(args: argparse.Namespace) -> Tuple[Autograsper, dict, str]:
     return autograsper, config, script_dir
 
 
-def start_threads(autograsper: Autograsper, config: dict) -> Tuple[threading.Thread, threading.Thread, List[str]]:
-    colors = eval(config["experiment"]["colors"])
-    block_heights = np.array(eval(config["experiment"]["block_heights"]))
-
-    autograsper_thread = threading.Thread(
-        target=run_autograsper,
-        args=(autograsper, colors, block_heights, config),
-    )
-    monitor_thread = threading.Thread(
-        target=monitor_state, args=(autograsper, shared_state)
-    )
-
-    autograsper_thread.start()
-    monitor_thread.start()
-
-    return autograsper_thread, monitor_thread, colors
+async def run_autograsper(autograsper: Autograsper, colors: List[str], block_heights: np.ndarray, config: dict) -> None:
+    try:
+        await asyncio.to_thread(autograsper.run_grasping, colors, block_heights, config)
+    except Exception as e:
+        handle_error(e)
 
 
-def handle_state_changes(
+async def run_recorder(recorder: Recorder) -> None:
+    try:
+        await asyncio.to_thread(recorder.record)
+    except Exception as e:
+        handle_error(e)
+
+
+async def monitor_state(autograsper: Autograsper) -> None:
+    try:
+        while not ERROR_EVENT.is_set():
+            if shared_state.state != autograsper.state:
+                shared_state.state = autograsper.state
+                if shared_state.state == RobotActivity.FINISHED:
+                    break
+            await asyncio.sleep(0.1)
+    except Exception as e:
+        handle_error(e)
+
+
+async def monitor_bottom_image(recorder: Recorder, autograsper: Autograsper) -> None:
+    try:
+        while not ERROR_EVENT.is_set():
+            if recorder and recorder.bottom_image is not None:
+                autograsper.bottom_image = np.copy(recorder.bottom_image)
+            await asyncio.sleep(0.1)
+    except Exception as e:
+        handle_error(e)
+
+
+async def handle_state_changes(
     autograsper: Autograsper,
     config: dict,
     script_dir: str,
@@ -167,92 +138,77 @@ def handle_state_changes(
     session_dir, task_dir, restore_dir = "", "", ""
 
     while not ERROR_EVENT.is_set():
-        with STATE_LOCK:
-            if shared_state.state != prev_robot_activity:
-                if (
-                    prev_robot_activity != RobotActivity.STARTUP
-                    and shared_state.recorder
-                ):
-                    shared_state.recorder.write_final_image()
+        if shared_state.state != prev_robot_activity:
+            if (
+                prev_robot_activity != RobotActivity.STARTUP
+                and shared_state.recorder
+            ):
+                await asyncio.to_thread(shared_state.recorder.write_final_image)
 
-                if shared_state.state == RobotActivity.ACTIVE:
-                    session_dir, task_dir, restore_dir = create_new_data_point(
-                        script_dir
+            if shared_state.state == RobotActivity.ACTIVE:
+                session_dir, task_dir, restore_dir = create_new_data_point(
+                    script_dir
+                )
+                autograsper.output_dir = task_dir
+
+                if not shared_state.recorder:
+                    shared_state.recorder = setup_recorder(
+                        task_dir, args.robot_idx, config
                     )
-                    autograsper.output_dir = task_dir
+                    asyncio.create_task(run_recorder(shared_state.recorder))
+                    asyncio.create_task(monitor_bottom_image(shared_state.recorder, autograsper))
 
-                    if not shared_state.recorder:
-                        shared_state.recorder = setup_recorder(
-                            task_dir, args.robot_idx, config
-                        )
-                        shared_state.recorder_thread = threading.Thread(
-                            target=run_recorder, args=(shared_state.recorder,)
-                        )
-                        shared_state.recorder_thread.start()
-                        shared_state.bottom_image_thread = threading.Thread(
-                            target=monitor_bottom_image,
-                            args=(shared_state.recorder, autograsper),
-                        )
-                        shared_state.bottom_image_thread.start()
+                await asyncio.to_thread(shared_state.recorder.start_new_recording, task_dir)
+                await asyncio.sleep(0.5)
+                autograsper.start_flag = True
 
-                    shared_state.recorder.start_new_recording(task_dir)
-                    time.sleep(0.5)
-                    autograsper.start_flag = True
+            elif shared_state.state == RobotActivity.RESETTING:
+                status_message = (
+                    "success"
+                    if not all_objects_are_visible(colors, shared_state.recorder.bottom_image, debug=False)
+                    else "fail"
+                )
+                if status_message == "fail":
+                    autograsper.failed = True
 
-                elif shared_state.state == RobotActivity.RESETTING:
-                    status_message = (
-                        "success"
-                        if is_stacking_successful(shared_state.recorder, colors)
-                        else "fail"
-                    )
-                    if status_message == "fail":
-                        autograsper.failed = True
+                logger.info(status_message)
+                with open(
+                    os.path.join(session_dir, "status.txt"), "w"
+                ) as status_file:
+                    status_file.write(status_message)
 
-                    logger.info(status_message)
-                    with open(
-                        os.path.join(session_dir, "status.txt"), "w"
-                    ) as status_file:
-                        status_file.write(status_message)
+                autograsper.output_dir = restore_dir
+                await asyncio.to_thread(shared_state.recorder.start_new_recording, restore_dir)
 
-                    autograsper.output_dir = restore_dir
-                    shared_state.recorder.start_new_recording(restore_dir)
+            prev_robot_activity = shared_state.state
 
-                prev_robot_activity = shared_state.state
+        if shared_state.state == RobotActivity.FINISHED:
+            if shared_state.recorder:
+                shared_state.recorder.stop()
+                await asyncio.sleep(1)
+            break
 
-            if shared_state.state == RobotActivity.FINISHED:
-                if shared_state.recorder:
-                    shared_state.recorder.stop()
-                    time.sleep(1)
-                    shared_state.recorder_thread.join()
-                    shared_state.bottom_image_thread.join()
-                break
+        await asyncio.sleep(0.1)
 
 
-def cleanup(
-    autograsper_thread: threading.Thread, monitor_thread: threading.Thread
-) -> None:
-    ERROR_EVENT.set()
-    autograsper_thread.join()
-    monitor_thread.join()
-    if shared_state.recorder_thread and shared_state.recorder_thread.is_alive():
-        shared_state.recorder_thread.join()
-    if shared_state.bottom_image_thread and shared_state.bottom_image_thread.is_alive():
-        shared_state.bottom_image_thread.join()
-
-
-def main():
+async def main():
     args = parse_arguments()
     autograsper, config, script_dir = initialize(args)
 
-    autograsper_thread, monitor_thread, colors = start_threads(autograsper, config)
+    colors = eval(config["experiment"]["colors"])
+    block_heights = np.array(eval(config["experiment"]["block_heights"]))
+
+    autograsper_task = asyncio.create_task(run_autograsper(autograsper, colors, block_heights, config))
+    monitor_state_task = asyncio.create_task(monitor_state(autograsper))
 
     try:
-        handle_state_changes(autograsper, config, script_dir, colors, args)
+        await handle_state_changes(autograsper, config, script_dir, colors, args)
     except Exception as e:
         handle_error(e)
     finally:
-        cleanup(autograsper_thread, monitor_thread)
+        ERROR_EVENT.set()
+        await asyncio.gather(autograsper_task, monitor_state_task)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
