@@ -19,15 +19,50 @@ logger = logging.getLogger(__name__)
 
 ERROR_EVENT = asyncio.Event()
 
+class TaskManager:
+    def __init__(self):
+        self.tasks = []
+
+    def create_task(self, coro):
+        task = asyncio.create_task(coro)
+        self.tasks.append(task)
+        return task
+
+    async def cancel_all_tasks(self):
+        for task in self.tasks:
+            task.cancel()
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+
+
+class RecorderManager:
+    def __init__(self, output_dir: str, robot_idx: str, config: dict):
+        self.output_dir = output_dir
+        self.recorder = self.setup_recorder(output_dir, robot_idx, config)
+
+    def setup_recorder(self, output_dir: str, robot_idx: str, config: dict) -> Recorder:
+        session_id = "test"
+        camera_matrix = np.array(config["camera"]["m"])
+        distortion_coefficients = np.array(config["camera"]["d"])
+        token = os.getenv("ROBOT_TOKEN")
+        if not token:
+            raise ValueError("ROBOT_TOKEN environment variable not set")
+        return Recorder(session_id, output_dir, camera_matrix, distortion_coefficients, token, robot_idx)
+
+    async def start_recording(self, task_dir: str):
+        await asyncio.to_thread(self.recorder.start_new_recording, task_dir)
+
+    async def stop_recording(self):
+        await asyncio.to_thread(self.recorder.write_final_image)
+        self.recorder.stop()
+
 
 class SharedState:
     def __init__(self):
         self.state: RobotActivity = RobotActivity.STARTUP
-        self.recorder: Optional[Recorder] = None
+        self.recorder_manager: Optional[RecorderManager] = None
 
 
 shared_state = SharedState()
-
 
 def load_config(config_file: str = "stack_from_scratch/config.ini") -> dict:
     config = ConfigParser()
@@ -51,16 +86,6 @@ def handle_error(exception: Exception) -> None:
     logger.error(f"Error occurred: {exception}")
     logger.error(traceback.format_exc())
     ERROR_EVENT.set()
-
-
-def setup_recorder(output_dir: str, robot_idx: str, config: dict) -> Recorder:
-    session_id = "test"
-    camera_matrix = np.array(config["camera"]["m"])
-    distortion_coefficients = np.array(config["camera"]["d"])
-    token = os.getenv("ROBOT_TOKEN")
-    if not token:
-        raise ValueError("ROBOT_TOKEN environment variable not set")
-    return Recorder(session_id, output_dir, camera_matrix, distortion_coefficients, token, robot_idx)
 
 
 def create_new_data_point(script_dir: str) -> Tuple[str, str, str]:
@@ -102,13 +127,6 @@ async def run_autograsper(autograsper: Autograsper, colors: List[str], block_hei
         handle_error(e)
 
 
-async def run_recorder(recorder: Recorder) -> None:
-    try:
-        await asyncio.to_thread(recorder.record)
-    except Exception as e:
-        handle_error(e)
-
-
 async def monitor_state(autograsper: Autograsper) -> None:
     try:
         while not ERROR_EVENT.is_set():
@@ -131,13 +149,13 @@ async def monitor_bottom_image(recorder: Recorder, autograsper: Autograsper) -> 
         handle_error(e)
 
 
-async def start_new_recording(session_dir: str, task_dir: str, restore_dir: str, autograsper: Autograsper, args: argparse.Namespace, config: dict) -> None:
+async def start_new_recording(session_dir: str, task_dir: str, restore_dir: str, autograsper: Autograsper, args: argparse.Namespace, config: dict, task_manager: TaskManager) -> None:
     autograsper.output_dir = task_dir
-    if not shared_state.recorder:
-        shared_state.recorder = setup_recorder(task_dir, args.robot_idx, config)
-        asyncio.create_task(run_recorder(shared_state.recorder))
-        asyncio.create_task(monitor_bottom_image(shared_state.recorder, autograsper))
-    await asyncio.to_thread(shared_state.recorder.start_new_recording, task_dir)
+    if not shared_state.recorder_manager:
+        shared_state.recorder_manager = RecorderManager(task_dir, args.robot_idx, config)
+        task_manager.create_task(run_recorder(shared_state.recorder_manager.recorder))
+        task_manager.create_task(monitor_bottom_image(shared_state.recorder_manager.recorder, autograsper))
+    await shared_state.recorder_manager.start_recording(task_dir)
     await asyncio.sleep(0.5)
     autograsper.start_flag = True
 
@@ -145,7 +163,7 @@ async def start_new_recording(session_dir: str, task_dir: str, restore_dir: str,
 async def reset_experiment(session_dir: str, restore_dir: str, autograsper: Autograsper, colors: List[str]) -> None:
     status_message = (
         "success"
-        if not all_objects_are_visible(colors, shared_state.recorder.bottom_image, debug=False)
+        if not all_objects_are_visible(colors, shared_state.recorder_manager.recorder.bottom_image, debug=False)
         else "fail"
     )
     if status_message == "fail":
@@ -156,7 +174,7 @@ async def reset_experiment(session_dir: str, restore_dir: str, autograsper: Auto
         status_file.write(status_message)
 
     autograsper.output_dir = restore_dir
-    await asyncio.to_thread(shared_state.recorder.start_new_recording, restore_dir)
+    await shared_state.recorder_manager.start_recording(restore_dir)
 
 
 async def handle_state_changes(
@@ -165,18 +183,19 @@ async def handle_state_changes(
     script_dir: str,
     colors: List[str],
     args: argparse.Namespace,
+    task_manager: TaskManager,
 ) -> None:
     prev_robot_activity = RobotActivity.STARTUP
     session_dir, task_dir, restore_dir = "", "", ""
 
     while not ERROR_EVENT.is_set():
         if shared_state.state != prev_robot_activity:
-            if prev_robot_activity != RobotActivity.STARTUP and shared_state.recorder:
-                await asyncio.to_thread(shared_state.recorder.write_final_image)
+            if prev_robot_activity != RobotActivity.STARTUP and shared_state.recorder_manager:
+                await shared_state.recorder_manager.stop_recording()
 
             if shared_state.state == RobotActivity.ACTIVE:
                 session_dir, task_dir, restore_dir = create_new_data_point(script_dir)
-                await start_new_recording(session_dir, task_dir, restore_dir, autograsper, args, config)
+                await start_new_recording(session_dir, task_dir, restore_dir, autograsper, args, config, task_manager)
 
             elif shared_state.state == RobotActivity.RESETTING:
                 await reset_experiment(session_dir, restore_dir, autograsper, colors)
@@ -184,8 +203,8 @@ async def handle_state_changes(
             prev_robot_activity = shared_state.state
 
         if shared_state.state == RobotActivity.FINISHED:
-            if shared_state.recorder:
-                shared_state.recorder.stop()
+            if shared_state.recorder_manager:
+                await shared_state.recorder_manager.stop_recording()
                 await asyncio.sleep(1)
             break
 
@@ -195,20 +214,21 @@ async def handle_state_changes(
 async def main():
     args = parse_arguments()
     autograsper, config, script_dir = initialize(args)
+    task_manager = TaskManager()
 
     colors = config["experiment"]["colors"]
     block_heights = np.array(config["experiment"]["block_heights"])
 
-    autograsper_task = asyncio.create_task(run_autograsper(autograsper, colors, block_heights, config))
-    monitor_state_task = asyncio.create_task(monitor_state(autograsper))
+    autograsper_task = task_manager.create_task(run_autograsper(autograsper, colors, block_heights, config))
+    monitor_state_task = task_manager.create_task(monitor_state(autograsper))
 
     try:
-        await handle_state_changes(autograsper, config, script_dir, colors, args)
+        await handle_state_changes(autograsper, config, script_dir, colors, args, task_manager)
     except Exception as e:
         handle_error(e)
     finally:
         ERROR_EVENT.set()
-        await asyncio.gather(autograsper_task, monitor_state_task)
+        await task_manager.cancel_all_tasks()
 
 
 if __name__ == "__main__":
