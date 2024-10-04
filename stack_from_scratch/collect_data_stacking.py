@@ -5,7 +5,7 @@ import threading
 import time
 import traceback
 from configparser import ConfigParser
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, List
 
 import numpy as np
 from autograsper import Autograsper, RobotActivity
@@ -33,10 +33,10 @@ class SharedState:
 shared_state = SharedState()
 
 
-def load_config(config_file: str = "stack_from_scratch/config.ini") -> ConfigParser:
+def load_config(config_file: str = "stack_from_scratch/config.ini") -> dict:
     config = ConfigParser()
     config.read(config_file)
-    return config
+    return {section: dict(config.items(section)) for section in config.sections()}
 
 
 def get_new_session_id(base_dir: str) -> int:
@@ -54,32 +54,21 @@ def handle_error(exception: Exception) -> None:
     ERROR_EVENT.set()
 
 
-def run_autograsper(
-    autograsper: Autograsper,
-    colors,
-    block_heights,
-    position_bank,
-    stack_position,
-    object_size,
-) -> None:
+def run_autograsper(autograsper: Autograsper, colors: List[str], block_heights: np.ndarray, config: dict) -> None:
     try:
-        autograsper.run_grasping(
-            colors, block_heights, position_bank, stack_position, object_size
-        )
+        autograsper.run_grasping(colors, block_heights, config)
     except Exception as e:
         handle_error(e)
 
 
-def setup_recorder(output_dir: str, robot_idx: str, config: ConfigParser) -> Recorder:
+def setup_recorder(output_dir: str, robot_idx: str, config: dict) -> Recorder:
     session_id = "test"
     camera_matrix = np.array(eval(config["camera"]["m"]))
     distortion_coefficients = np.array(eval(config["camera"]["d"]))
     token = os.getenv("ROBOT_TOKEN")
     if not token:
         raise ValueError("ROBOT_TOKEN environment variable not set")
-    return Recorder(
-        session_id, output_dir, camera_matrix, distortion_coefficients, token, robot_idx
-    )
+    return Recorder(session_id, output_dir, camera_matrix, distortion_coefficients, token, robot_idx)
 
 
 def run_recorder(recorder: Recorder) -> None:
@@ -102,7 +91,7 @@ def monitor_state(autograsper: Autograsper, shared_state: SharedState) -> None:
         handle_error(e)
 
 
-def is_stacking_successful(recorder: Recorder, colors) -> bool:
+def is_stacking_successful(recorder: Recorder, colors: List[str]) -> bool:
     return not all_objects_are_visible(colors, recorder.bottom_image, debug=False)
 
 
@@ -142,32 +131,20 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def initialize(args: argparse.Namespace) -> Tuple[Autograsper, ConfigParser, str]:
-    config = load_config()
+def initialize(args: argparse.Namespace) -> Tuple[Autograsper, dict, str]:
+    config = load_config(args.config)
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    autograsper = Autograsper(args, output_dir="")
+    autograsper = Autograsper(args, config)
     return autograsper, config, script_dir
 
 
-def start_threads(
-    autograsper: Autograsper, config: ConfigParser
-) -> Tuple[threading.Thread, threading.Thread, list]:
+def start_threads(autograsper: Autograsper, config: dict) -> Tuple[threading.Thread, threading.Thread, List[str]]:
     colors = eval(config["experiment"]["colors"])
     block_heights = np.array(eval(config["experiment"]["block_heights"]))
-    position_bank = eval(config["experiment"]["position_bank"])
-    stack_position = eval(config["experiment"]["stack_position"])
-    object_size = config.getfloat("experiment", "object_size")
 
     autograsper_thread = threading.Thread(
         target=run_autograsper,
-        args=(
-            autograsper,
-            colors,
-            block_heights,
-            position_bank,
-            stack_position,
-            object_size,
-        ),
+        args=(autograsper, colors, block_heights, config),
     )
     monitor_thread = threading.Thread(
         target=monitor_state, args=(autograsper, shared_state)
@@ -181,9 +158,9 @@ def start_threads(
 
 def handle_state_changes(
     autograsper: Autograsper,
-    config: ConfigParser,
+    config: dict,
     script_dir: str,
-    colors,
+    colors: List[str],
     args: argparse.Namespace,
 ) -> None:
     prev_robot_activity = RobotActivity.STARTUP
