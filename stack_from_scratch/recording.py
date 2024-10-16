@@ -1,8 +1,15 @@
+from library.utils import (
+    convert_ndarray_to_list,
+    get_undistorted_bottom_image,
+)  # Assuming these are the correct imports
+# Assuming this is the correct import
+from client.cloudgripper_client import GripperRobot
 import os
 import sys
 import time
 import json
 import logging
+import asyncio
 from typing import Any, Tuple, List, Dict
 import cv2
 
@@ -11,15 +18,9 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from client.cloudgripper_client import (
-    GripperRobot,
-)  # Assuming this is the correct import
-from library.utils import (
-    convert_ndarray_to_list,
-    get_undistorted_bottom_image,
-)  # Assuming these are the correct imports
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class Recorder:
@@ -27,7 +28,7 @@ class Recorder:
     FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 
     def __init__(
-        self, session_id: str, output_dir: str, m: Any, d: Any, token: str, idx: str
+        self, session_id: str, output_dir: str, m: Any, d: Any, token: str, idx: int
     ):
         self.session_id = session_id
         self.output_dir = output_dir
@@ -40,17 +41,20 @@ class Recorder:
         self.video_counter = 0
         self.video_writer_top = None
         self.video_writer_bottom = None
+        self.lock = asyncio.Lock()  # For thread safety
 
         self.robot = GripperRobot(self.robot_idx, self.token)
         self.image_top, _ = self.robot.get_image_top()
-        self.bottom_image = get_undistorted_bottom_image(self.robot, self.m, self.d)
+        self.bottom_image = get_undistorted_bottom_image(
+            self.robot, self.m, self.d)
 
         self._initialize_directories()
 
     def _initialize_directories(self) -> None:
         """Initialize output directories."""
         self.output_video_dir = os.path.join(self.output_dir, "Video")
-        self.output_bottom_video_dir = os.path.join(self.output_dir, "Bottom_Video")
+        self.output_bottom_video_dir = os.path.join(
+            self.output_dir, "Bottom_Video")
         self.final_image_dir = os.path.join(self.output_dir, "Final_Image")
         os.makedirs(self.output_video_dir, exist_ok=True)
         os.makedirs(self.output_bottom_video_dir, exist_ok=True)
@@ -74,57 +78,59 @@ class Recorder:
 
         return video_writer_top, video_writer_bottom
 
-    def record(self, start_new_video_every: int = 30) -> None:
-        """Record video with optional periodic video restarts."""
+    async def record(self, start_new_video_every: int = 30) -> None:
+        """Asynchronous recording loop with optional periodic video restarts."""
         self._prepare_new_recording()
         try:
             while not self.stop_flag:
-                self._capture_frame()
+                await self._capture_frame()
                 if (
                     start_new_video_every
                     and self.frame_counter % start_new_video_every == 0
                     and self.frame_counter != 0
                 ):
                     self.video_counter += 1
-                    self._start_or_restart_video_writers()
+                    await self._start_or_restart_video_writers()
 
-                time.sleep(1 / self.FPS)
-                self.save_state(self.robot)
+                await asyncio.sleep(1 / self.FPS)
+                await self.save_state(self.robot)
                 self.frame_counter += 1
-                logging.info("Frames recorded: %d", self.frame_counter)
+                logger.info("Frames recorded: %d", self.frame_counter)
 
-                cv2.imshow(f"ImageBottom_{self.robot_idx}", self.bottom_image)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    self.stop_flag = True
+                # Optionally display the bottom image
+                # cv2.imshow(f"ImageBottom_{self.robot_idx}", self.bottom_image)
+                # if cv2.waitKey(1) & 0xFF == ord("q"):
+                #     self.stop_flag = True
         except Exception as e:
-            logging.error("An error occurred: %s", e)
+            logger.error("An error occurred: %s", e)
         finally:
-            self._release_writers()
-            cv2.destroyAllWindows()
+            await self._release_writers()
+            # cv2.destroyAllWindows()
 
-    def _capture_frame(self) -> None:
+    async def _capture_frame(self) -> None:
         """Capture frames from the robot's cameras and write directly to video file."""
-        try:
-            image_top, _ = self.robot.get_image_top()
-            bottom_image = get_undistorted_bottom_image(self.robot, self.m, self.d)
+        async with self.lock:
+            try:
+                image_top, _ = await self.robot.get_image_top_async()
+                bottom_image = await get_undistorted_bottom_image_async(self.robot, self.m, self.d)
 
-            if self.video_writer_top and self.video_writer_bottom:
-                self.video_writer_top.write(image_top)
-                self.video_writer_bottom.write(bottom_image)
-            else:
-                logging.warning("Video writers not initialized.")
+                if self.video_writer_top and self.video_writer_bottom:
+                    self.video_writer_top.write(image_top)
+                    self.video_writer_bottom.write(bottom_image)
+                else:
+                    logger.warning("Video writers not initialized.")
 
-            self.image_top = image_top
-            self.bottom_image = bottom_image
-        except Exception as e:
-            logging.error("Error capturing frame: %s", e)
+                self.image_top = image_top
+                self.bottom_image = bottom_image
+            except Exception as e:
+                logger.error("Error capturing frame: %s", e)
 
-    def _start_or_restart_video_writers(self) -> None:
+    async def _start_or_restart_video_writers(self) -> None:
         """Start or restart video writers."""
-        self._release_writers()  # Ensure the old writers are released
+        await self._release_writers()  # Ensure the old writers are released
         self.video_writer_top, self.video_writer_bottom = self._start_new_video()
 
-    def _release_writers(self) -> None:
+    async def _release_writers(self) -> None:
         """Release the video writers."""
         if self.video_writer_top:
             self.video_writer_top.release()
@@ -133,41 +139,42 @@ class Recorder:
             self.video_writer_bottom.release()
             self.video_writer_bottom = None
 
-    def write_final_image(self) -> None:
+    async def write_final_image(self) -> None:
         """Write the final image from the top camera."""
         try:
-            logging.info("Writing final image")
-            image_top, _ = self.robot.get_image_top()
+            logger.info("Writing final image")
+            image_top, _ = await self.robot.get_image_top_async()
             final_image_path = os.path.join(
                 self.final_image_dir, f"final_image_{self.video_counter}.jpg"
             )
             cv2.imwrite(final_image_path, image_top)
         except Exception as e:
-            logging.error("Error writing final image: %s", e)
+            logger.error("Error writing final image: %s", e)
 
-    def start_new_recording(self, new_output_dir: str) -> None:
+    async def start_new_recording(self, new_output_dir: str) -> None:
         """Start a new recording session with a new output directory."""
         self.output_dir = new_output_dir
         self._initialize_directories()
-        self._prepare_new_recording()
-        logging.info("Started new recording in directory: %s", new_output_dir)
+        await self._prepare_new_recording()
+        logger.info("Started new recording in directory: %s", new_output_dir)
 
-    def _prepare_new_recording(self) -> None:
+    async def _prepare_new_recording(self) -> None:
         """Prepare for a new recording session."""
         self.frame_counter = 0
         self.video_counter = 0
         self.stop_flag = False
-        self._start_or_restart_video_writers()
+        await self._start_or_restart_video_writers()
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Set the stop flag to terminate recording."""
         self.stop_flag = True
-        logging.info("Stop flag set to True")
+        await self._release_writers()
+        logger.info("Recording stopped.")
 
-    def save_state(self, robot: GripperRobot) -> None:
+    async def save_state(self, robot: GripperRobot) -> None:
         """Save the state of the robot to a JSON file."""
         try:
-            state, timestamp = robot.get_state()
+            state, timestamp = await robot.get_state_async()
             state = convert_ndarray_to_list(state)
             state["time"] = timestamp
 
@@ -183,4 +190,4 @@ class Recorder:
             with open(state_file, "w") as file:
                 json.dump(data, file, indent=4)
         except Exception as e:
-            logging.error("Error saving state: %s", e)
+            logger.error("Error saving state: %s", e)
