@@ -4,9 +4,17 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 import numpy as np
 from requests import exceptions, get
+import asyncio
 
+import sys
+from pathlib import Path
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
 
-class GripperRobot:
+from robot_interface import IRobot
+
+class GripperRobot(IRobot):
     """
     A class to represent a gripper robot and interact with its API.
 
@@ -20,17 +28,17 @@ class GripperRobot:
 
     api_address_robots = {f"robot{i}": f"https://cloudgripper.eecs.kth.se:8443/robot{i}/api/v1.1/robot" for i in range(1, 33)}
 
-    def __init__(self, name: str, token: str):
+    def __init__(self, robot_idx: int, token: str):
         """
-        Initialize the GripperRobot with a name and API token.
+        Initialize the GripperRobot with a robot index and API token.
 
         Args:
-            name (str): The name of the robot.
+            robot_idx (int): The index of the robot.
             token (str): The API token for authentication.
         """
-        self.name = name
+        self.name = f"robot{robot_idx}"
         self.headers = {"apiKey": token}
-        self.base_api = self.api_address_robots[name]
+        self.base_api = self.api_address_robots[self.name]
         self.order_count = 0
 
     def _make_request(self, endpoint: str) -> Optional[Dict[str, Any]]:
@@ -66,6 +74,101 @@ class GripperRobot:
             return response[key]
         return None
 
+    async def move_xy(self, position: Tuple[float, float]) -> None:
+        """
+        Move the robot along the X and Y axes asynchronously.
+
+        Args:
+            position (Tuple[float, float]): The (x, y) position to move to.
+        """
+        x, y = position
+        # Convert positions to integers if necessary
+        x_int = int(x)
+        y_int = int(y)
+        await asyncio.to_thread(self._move_xy_sync, x_int, y_int)
+
+    def _move_xy_sync(self, x: int, y: int) -> None:
+        """
+        Move the robot along the X and Y axes synchronously.
+
+        Args:
+            x (int): The distance to move along the X-axis.
+            y (int): The distance to move along the Y-axis.
+        """
+        self._make_request(f"gcode/{x}/{y}")
+
+    async def move_z(self, height: float) -> None:
+        """
+        Move the robot along the Z-axis asynchronously.
+
+        Args:
+            height (float): The height to move to.
+        """
+        z_int = int(height)
+        await asyncio.to_thread(self._move_z_sync, z_int)
+
+    def _move_z_sync(self, z: int) -> None:
+        """
+        Move the robot along the Z-axis synchronously.
+
+        Args:
+            z (int): The height to move to.
+        """
+        self._make_request(f"up_down/{z}")
+
+    async def gripper_open(self) -> None:
+        """
+        Open the robot's gripper asynchronously.
+        """
+        await asyncio.to_thread(self._gripper_open_sync)
+
+    def _gripper_open_sync(self) -> None:
+        """
+        Open the robot's gripper synchronously.
+        """
+        self.move_gripper(1)
+
+    async def gripper_close(self) -> None:
+        """
+        Close the robot's gripper asynchronously.
+        """
+        await asyncio.to_thread(self._gripper_close_sync)
+
+    def _gripper_close_sync(self) -> None:
+        """
+        Close the robot's gripper synchronously.
+        """
+        self.move_gripper(0)
+
+    def move_gripper(self, angle: int) -> None:
+        """
+        Move the robot's gripper to a specified angle.
+
+        Args:
+            angle (int): The angle to move the gripper to.
+        """
+        self._make_request(f"grip/{angle}")
+
+    async def get_bottom_image(self) -> np.ndarray:
+        """
+        Get the bottom image from the robot's camera asynchronously.
+
+        Returns:
+            np.ndarray: The bottom image as a numpy array.
+        """
+        return await asyncio.to_thread(self._get_bottom_image_sync)
+
+    def _get_bottom_image_sync(self) -> np.ndarray:
+        """
+        Get the bottom image from the robot's camera synchronously.
+
+        Returns:
+            np.ndarray: The bottom image as a numpy array.
+        """
+        image, _ = self.get_image_base()
+        return image
+
+    # Existing methods from the original GripperRobot class
     def get_state(self) -> Tuple[Optional[str], Optional[str]]:
         """
         Get the current state of the robot.
@@ -76,122 +179,25 @@ class GripperRobot:
         response = self._make_request("getState")
         return self._safe_get(response, "state"), self._safe_get(response, "timestamp")
 
-    def step_forward(self) -> Optional[str]:
+    def get_image_base(
+        self,
+    ) -> Tuple[Optional[np.ndarray], Optional[str]]:
         """
-        Move the robot one step forward.
+        Get the base (bottom) image from the robot's camera.
 
         Returns:
-            Optional[str]: The time taken for the step.
+            Tuple[Optional[np.ndarray], Optional[str]]: The image as a numpy array and the timestamp.
         """
-        response = self._make_request("moveUp")
-        return self._safe_get(response, "time")
+        return self._get_image("getImageBase")
 
-    def step_backward(self) -> Optional[str]:
+    def get_image_top(self) -> Tuple[Optional[np.ndarray], Optional[str]]:
         """
-        Move the robot one step backward.
+        Get the top image from the robot's camera.
 
         Returns:
-            Optional[str]: The time taken for the step.
+            Tuple[Optional[np.ndarray], Optional[str]]: The image as a numpy array and the timestamp.
         """
-        response = self._make_request("moveDown")
-        return self._safe_get(response, "time")
-
-    def step_left(self) -> Optional[str]:
-        """
-        Move the robot one step to the left.
-
-        Returns:
-            Optional[str]: The time taken for the step.
-        """
-        response = self._make_request("moveLeft")
-        return self._safe_get(response, "time")
-
-    def step_right(self) -> Optional[str]:
-        """
-        Move the robot one step to the right.
-
-        Returns:
-            Optional[str]: The time taken for the step.
-        """
-        response = self._make_request("moveRight")
-        return self._safe_get(response, "time")
-
-    def move_gripper(self, angle: int) -> Optional[str]:
-        """
-        Move the robot's gripper to a specified angle.
-
-        Args:
-            angle (int): The angle to move the gripper to.
-
-        Returns:
-            Optional[str]: The time taken for the movement.
-        """
-        response = self._make_request(f"grip/{angle}")
-        return self._safe_get(response, "time")
-
-    def gripper_close(self) -> Optional[str]:
-        """
-        Close the robot's gripper.
-
-        Returns:
-            Optional[str]: The time taken for the movement.
-        """
-        return self.move_gripper(0)
-
-    def gripper_open(self) -> Optional[str]:
-        """
-        Open the robot's gripper.
-
-        Returns:
-            Optional[str]: The time taken for the movement.
-        """
-        return self.move_gripper(1)
-
-    def rotate(self, angle: int) -> Optional[str]:
-        """
-        Rotate the robot to a specified angle.
-
-        Args:
-            angle (int): The angle to rotate the robot to.
-
-        Returns:
-            Optional[str]: The time taken for the rotation.
-        """
-        response = self._make_request(f"rotate/{angle}")
-        return self._safe_get(response, "time")
-
-    def move_z(self, z: int) -> Optional[str]:
-        """
-        Move the robot along the Z-axis.
-
-        Args:
-            z (int): The distance to move along the Z-axis.
-
-        Returns:
-            Optional[str]: The time taken for the movement.
-        """
-        response = self._make_request(f"up_down/{z}")
-        return self._safe_get(response, "time")
-
-    def move_xy(self, x: int, y: int) -> Optional[str]:
-        """
-        Move the robot along the X and Y axes.
-
-        Args:
-            x (int): The distance to move along the X-axis.
-            y (int): The distance to move along the Y-axis.
-
-        Returns:
-            Optional[str]: The time taken for the movement.
-        """
-        response = self._make_request(f"gcode/{x}/{y}")
-        return self._safe_get(response, "time")
-
-    def calibrate(self) -> None:
-        """
-        Calibrate the robot.
-        """
-        self._make_request("calibrate")
+        return self._get_image("getImageTop")
 
     def _decode_image(self, image_str: str) -> Optional[np.ndarray]:
         """
@@ -222,7 +228,7 @@ class GripperRobot:
             endpoint (str): The API endpoint to call for the image.
 
         Returns:
-            Tuple[Optional[np.ndarray], Optional[str], Optional[str]]: The image as a numpy array, the timestamp, and the raw base64 image data.
+            Tuple[Optional[np.ndarray], Optional[str]]: The image as a numpy array and the timestamp.
         """
         response = self._make_request(endpoint)
         image_data = self._safe_get(response, "data")
@@ -234,59 +240,3 @@ class GripperRobot:
         else:
             print("Image not available")
             return None, None
-
-    def get_image_base(
-        self,
-    ) -> Tuple[Optional[np.ndarray], Optional[str], Optional[str]]:
-        """
-        Get the base image from the robot's camera.
-
-        Returns:
-            Tuple[Optional[np.ndarray], Optional[str], Optional[str]]: The image as a numpy array, the timestamp, and the raw base64 image data.
-        """
-        image, time_stamp = self._get_image("getImageBase")
-
-        return image, time_stamp
-
-    def get_image_top(self) -> Tuple[Optional[np.ndarray], Optional[str]]:
-        """
-        Get the top image from the robot's camera.
-
-        Returns:
-            Tuple[Optional[np.ndarray], Optional[str]]: The image as a numpy array and the timestamp.
-        """
-        img = self._get_image("getImageTop")
-
-        return img[0], img[1]
-
-    def get_all_states(
-        self,
-    ) -> Tuple[
-        Optional[np.ndarray],
-        Optional[np.ndarray],
-        Optional[str],
-        Optional[str],
-    ]:
-        """
-        Get the combined state and images from the robot.
-
-        Returns:
-            Tuple[Optional[np.ndarray], Optional[str], Optional[np.ndarray], Optional[str], Optional[str], Optional[str]]:
-                The top image, top image timestamp, base image, base image timestamp, robot state, and state timestamp.
-        """
-        response = self._make_request("getAllStates")
-        if response is None:
-            return None, None, None, None, None, None
-
-        image_top_data = self._safe_get(response, "data_top_camera")
-        time_top = self._safe_get(response, "time_top_camera")
-        image_top = self._decode_image(image_top_data)
-
-        image_base_data = self._safe_get(response, "data_base_camera")
-        time_base = self._safe_get(response, "time_base_camera")
-        image_base = self._decode_image(image_base_data)
-
-        state = self._safe_get(response, "state")
-        time_state = self._safe_get(response, "time_state")
-
-        return image_top, image_base, state, time_state
