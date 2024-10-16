@@ -1,6 +1,4 @@
-# stackingtask.py
-
-from task import Task
+from Task import Task
 from typing import List, Tuple, Any, TYPE_CHECKING
 import numpy as np
 
