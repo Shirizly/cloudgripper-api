@@ -13,7 +13,7 @@ load_dotenv()
 token = os.getenv("CLOUDGRIPPER_TOKEN")
 
 # Create a GripperRobot instance
-robotName = "robot23"
+robotName = "robot24"
 robot = GripperRobot(robotName, token)
 
 # Function to display multiple images using OpenCV
@@ -39,19 +39,28 @@ def display_images(images, window_name="Robot Images"):
 images = []
 
 # Get initial images
-img_base, timestamp = robot.getImageBase()
-img_top, timestamp = robot.getImageTop()
+img_base, timestamp = robot.get_image_base()
+img_top, timestamp = robot.get_image_top()
+
+
 
 # Convert images to proper format and append to list
 images.append(cv2.cvtColor(np.array(img_base), cv2.COLOR_RGB2BGR))
 images.append(cv2.cvtColor(np.array(img_top), cv2.COLOR_RGB2BGR))
 
+# Display initial images
+# display_images(images)
+
+# wait for user input
+# input("Press Enter to continue...")
+
 # Perform various robot actions and capture images
 actions = [
-    ("move_xy_0.5_0.5", lambda: robot.move_xy(1.0, 0.0)),
+    ("move_z_1", lambda: robot.move_z(1)),
+    ("move_z_-0.5", lambda: robot.move_z(-0.5)),
+    ("move_xy_1_0", lambda: robot.move_xy(1.0, 0.0)),
     ("gripper_close", robot.gripper_close),
     ("rotate_0", lambda: robot.rotate(0)),
-    ("move_z_0.3", lambda: robot.move_z(0.3)),
     ("move_xy_0.5_0.5", lambda: robot.move_xy(0.5, 0.5)),
     ("gripper_open", robot.gripper_open),
 ]
@@ -60,7 +69,7 @@ actions = [
 for action_name, action in actions:
     action()  # Perform the action
     time.sleep(1)  # Wait a bit for the action to complete
-    img_base, timestamp = robot.getImageBase()  # Get new image from base camera
+    img_base, timestamp = robot.get_image_base()  # Get new image from base camera
     images.append(cv2.cvtColor(np.array(img_base), cv2.COLOR_RGB2BGR))
 
 # Display all images
