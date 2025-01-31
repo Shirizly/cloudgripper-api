@@ -20,9 +20,9 @@ class StackingAutograsper(AutograsperBase):
         stack_position=None,
         object_size=2,
         camera_matrix=None,
-        distortion_coefficients=None,
+        distortion_coeffs=None,
     ):
-        super().__init__(args, output_dir, camera_matrix, distortion_coefficients)
+        super().__init__(args, output_dir, camera_matrix, distortion_coeffs)
         # Task-specific initialization
         self.colors = colors
         self.block_heights = block_heights
@@ -35,7 +35,7 @@ class StackingAutograsper(AutograsperBase):
             self.position_bank, self.stack_position
         )
         self.bottom_image = get_undistorted_bottom_image(
-            self.robot, self.camera_matrix, self.distortion_coefficients
+            self.robot, self.camera_matrix, self.distortion_coeffs
         )
 
     def prepare_experiment(self, position_bank, stack_position):

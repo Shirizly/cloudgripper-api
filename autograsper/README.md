@@ -77,7 +77,7 @@ The autograsper module is an example usage of the utils functions that scripts a
 
 - `__init__(self, session_id, output_dir, m, d, token, idx)`: Initializes the Recorder.
 - `_start_new_video(self, output_video_dir, output_bottom_video_dir, video_counter, fourcc, image_shape, bottom_image_shape)`: Starts a new video recording session.
-- `record(self, start_new_video_every)`: Records the robot's actions.
+- `record(self, clip_length)`: Records the robot's actions.
 - `_initialize_directories(self)`: Initializes the directories for saving recordings.
 - `start_new_recording(self, new_output_dir)`: Starts a new recording in a different directory.
 - `stop(self)`: Stops the recording process.

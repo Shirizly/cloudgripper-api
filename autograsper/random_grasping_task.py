@@ -9,35 +9,33 @@ import numpy as np
 from typing import List, Tuple
 import time
 import random
-
+import ast
 
 class RandomGrasper(AutograsperBase):
     def __init__(
         self,
         args,
+        config,
         output_dir: str = "",
-        colors=None,
-        block_heights=None,
-        position_bank=None,
-        stack_position=None,
-        object_size=2,
         camera_matrix=None,
-        distortion_coefficients=None,
+        distortion_coeffs=None,
     ):
-        super().__init__(args, output_dir, camera_matrix, distortion_coefficients)
+        super().__init__(args, output_dir, camera_matrix, distortion_coeffs)
         # Task-specific initialization
-        self.colors = colors
-        self.block_heights = block_heights
-        self.position_bank = position_bank
-        self.stack_position = stack_position
-        self.object_size = object_size
+        experiment_cfg = config["experiment"]
+
+        self.colors = ast.literal_eval(experiment_cfg["colors"])
+        self.block_heights = np.array(ast.literal_eval(experiment_cfg["block_heights"]))
+        self.position_bank = ast.literal_eval(experiment_cfg["position_bank"])
+        self.stack_position = ast.literal_eval(experiment_cfg["stack_position"])
+        self.object_size = config.getfloat("experiment", "object_size")
 
         # Prepare experiment
         self.position_bank, self.stack_position = self.prepare_experiment(
             self.position_bank, self.stack_position
         )
         self.bottom_image = get_undistorted_bottom_image(
-            self.robot, self.camera_matrix, self.distortion_coefficients
+            self.robot, self.camera_matrix, self.distortion_coeffs
         )
 
         self.time_between_orders = 1
@@ -68,9 +66,10 @@ class RandomGrasper(AutograsperBase):
     def perform_task(self):
 
         
-        run_calibration(0.2, self.robot)
+        # temp for testing refactor
+        time.sleep(5)
+        return
         
-
         # test_calibration(self.bottom_image, ["red"])
         # self.robot.gripper_open()
 

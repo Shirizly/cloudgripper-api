@@ -5,6 +5,8 @@ import json
 import logging
 from typing import Any, Tuple, List, Dict
 import cv2
+import ast
+import numpy as np
 
 # Ensure project root is in sys.path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -23,32 +25,41 @@ logging.basicConfig(level=logging.INFO)
 
 
 class Recorder:
-    FPS = 3.0
     FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 
     def __init__(
-        self, session_id: str, output_dir: str, m: Any, d: Any, token: str, idx: str
+        self, config: Any, output_dir: str, token: str
     ):
-        self.session_id = session_id
+
+        experiment_cfg = config["experiment"]
+        self.experiment_name = ast.literal_eval(experiment_cfg["name"])
+        self.robot_idx = ast.literal_eval(experiment_cfg["robot_idx"])
+
         self.output_dir = output_dir
-        self.m = m
-        self.d = d
         self.token = token
-        self.robot_idx = idx
+
+        self.robot = GripperRobot(self.robot_idx, self.token)
+        self.image_top = None
+        self.bottom_image = None
+        self.pause = False
+
+        camera_cfg = config["camera"]
+        self.m = np.array(ast.literal_eval(camera_cfg["m"]))
+        self.d = np.array(ast.literal_eval(camera_cfg["d"]))
+        self.FPS = int(ast.literal_eval(camera_cfg["fps"]))
+
+        self.clip_length = None
+        if "clip_length" in camera_cfg:
+            self.clip_length = ast.literal_eval(camera_cfg["clip_length"])
+
+        self._update()
+
+        # initialize state variables
         self.stop_flag = False
         self.frame_counter = 0
         self.video_counter = 0
         self.video_writer_top = None
         self.video_writer_bottom = None
-
-        self.robot = GripperRobot(self.robot_idx, self.token)
-        self.image_top = None
-        self.bottom_image = None
-        self._update()
-        # self.image_top, _ = self.robot.get_image_top()
-        # self.bottom_image = get_undistorted_bottom_image(self.robot, self.m, self.d)
-        self.pause = False
-
         self._initialize_directories()
 
     def _initialize_directories(self) -> None:
@@ -76,7 +87,7 @@ class Recorder:
 
         return video_writer_top, video_writer_bottom
 
-    def record(self, start_new_video_every: int = 30) -> None:
+    def record(self) -> None:
         """Record video with optional periodic video restarts."""
         self._prepare_new_recording()
         try:
@@ -85,8 +96,8 @@ class Recorder:
                     self._update()
                     self._capture_frame()
                     if (
-                        start_new_video_every
-                        and self.frame_counter % start_new_video_every == 0
+                        self.clip_length
+                        and self.frame_counter % self.clip_length == 0
                         and self.frame_counter != 0
                     ):
                         self.video_counter += 1
@@ -95,7 +106,6 @@ class Recorder:
                     time.sleep(1 / self.FPS)
                     self.save_state()
                     self.frame_counter += 1
-                    #logging.info("Frames recorded: %d", self.frame_counter)
 
                     cv2.imshow(f"ImageBottom_{self.robot_idx}", self.bottom_image)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -151,9 +161,6 @@ class Recorder:
 
     def _prepare_new_recording(self) -> None:
         """Prepare for a new recording session."""
-        # TODO examine if this helps the segfaults
-        # self.frame_counter = 0
-        # self.video_counter = 0
         self.stop_flag = False
         self._start_or_restart_video_writers()
 

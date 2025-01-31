@@ -33,7 +33,7 @@ class AutograsperBase(ABC):
         args,
         output_dir: str = "",
         camera_matrix=None,
-        distortion_coefficients=None,
+        distortion_coeffs=None,
     ):
         self.token = os.getenv("CLOUDGRIPPER_TOKEN")
         if not self.token:
@@ -44,10 +44,10 @@ class AutograsperBase(ABC):
         self.failed = False
 
         # Camera calibration parameters
-        if camera_matrix is None or distortion_coefficients is None:
+        if camera_matrix is None or distortion_coeffs is None:
             raise ValueError("Camera calibration parameters must be provided")
         self.camera_matrix = camera_matrix
-        self.distortion_coefficients = distortion_coefficients
+        self.distortion_coeffs = distortion_coeffs
 
         self.state = RobotActivity.STARTUP
         self.start_flag = False
