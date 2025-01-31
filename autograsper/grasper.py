@@ -35,9 +35,9 @@ class AutograsperBase(ABC):
         camera_matrix=None,
         distortion_coefficients=None,
     ):
-        self.token = os.getenv("ROBOT_TOKEN")
+        self.token = os.getenv("CLOUDGRIPPER_TOKEN")
         if not self.token:
-            raise ValueError("ROBOT_TOKEN environment variable not set")
+            raise ValueError("CLOUDGRIPPER_TOKEN environment variable not set")
 
         self.output_dir = output_dir
         self.start_time = time.time()

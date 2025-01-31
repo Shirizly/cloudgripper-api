@@ -114,10 +114,10 @@ pip install numpy opencv-python python-dotenv
 
 ### Step 2: Set Environment Variables
 
-The code requires an environment variable `ROBOT_TOKEN` to authenticate with the GripperRobot API. Create a `.env` file in the project root with the following content:
+The code requires an environment variable `CLOUDGRIPPER_TOKEN` to authenticate with the GripperRobot API. Create a `.env` file in the project root with the following content:
 
 ```env
-ROBOT_TOKEN=your_robot_token_here
+CLOUDGRIPPER_TOKEN=your_CLOUDGRIPPER_TOKEN_here
 ```
 
 ## Running the Code

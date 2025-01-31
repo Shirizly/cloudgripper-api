@@ -323,7 +323,7 @@ if __name__ == "__main__":
         ]
     )
 
-    token = os.getenv("ROBOT_TOKEN", "default_token")
+    token = os.getenv("CLOUDGRIPPER_TOKEN", "default_token")
 
     recorder = Recorder(args.session_id, args.output_dir, m, d, token, args.robot_idx)
     recorder.record()
