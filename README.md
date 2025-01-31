@@ -290,7 +290,7 @@ python stack_from_scratch/recorder.py --session_id session1 --output_dir ./outpu
 The main class responsible for recording video and saving the robot's state.
 
 - `__init__(self, session_id: str, output_dir: str, m: Any, d: Any, token: str, idx: str)`: Initialize the Recorder with the provided parameters.
-- `record(self, start_new_video_every: int = 30)`: Record video with optional periodic video restarts.
+- `record(self, clip_length: int = 30)`: Record video with optional periodic video restarts.
 - `start_new_recording(self, new_output_dir: str)`: Start a new recording session with a new output directory.
 - `stop(self)`: Set the stop flag to terminate recording.
 - `save_state(self, robot: Any)`: Save the state of the robot to a JSON file.
