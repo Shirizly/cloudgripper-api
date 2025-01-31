@@ -27,31 +27,39 @@ logging.basicConfig(level=logging.INFO)
 class Recorder:
     FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 
-    def __init__(
-        self, config: Any, output_dir: str, token: str
-    ):
+    def __init__(self, config: Any, output_dir: str):
 
-        experiment_cfg = config["experiment"]
-        self.experiment_name = ast.literal_eval(experiment_cfg["name"])
-        self.robot_idx = ast.literal_eval(experiment_cfg["robot_idx"])
+        try:
+            experiment_cfg = config["experiment"]
+            self.experiment_name = ast.literal_eval(experiment_cfg["name"])
+            self.robot_idx = ast.literal_eval(experiment_cfg["robot_idx"])
+
+            camera_cfg = config["camera"]
+            self.camera_matrix = np.array(ast.literal_eval(camera_cfg["m"]))
+            self.distortion_coeffs = np.array(ast.literal_eval(camera_cfg["d"]))
+
+            self.save_data = bool(ast.literal_eval(camera_cfg["record"]))
+            self.FPS = int(ast.literal_eval(camera_cfg["fps"]))
+
+            self.clip_length = None
+            if "clip_length" in camera_cfg:
+                self.clip_length = ast.literal_eval(camera_cfg["clip_length"])
+        except Exception as e:
+            raise ValueError("Recorder config.ini ERROR") from e
+
+
+        self.token = os.getenv("CLOUDGRIPPER_TOKEN")
+        if not self.token:
+            raise ValueError("CLOUDGRIPPER_TOKEN environment variable not set")
 
         self.output_dir = output_dir
-        self.token = token
-
         self.robot = GripperRobot(self.robot_idx, self.token)
         self.image_top = None
         self.bottom_image = None
         self.pause = False
 
-        camera_cfg = config["camera"]
-        self.m = np.array(ast.literal_eval(camera_cfg["m"]))
-        self.d = np.array(ast.literal_eval(camera_cfg["d"]))
-        self.FPS = int(ast.literal_eval(camera_cfg["fps"]))
-
-        self.clip_length = None
-        if "clip_length" in camera_cfg:
-            self.clip_length = ast.literal_eval(camera_cfg["clip_length"])
-
+        
+        
         self._update()
 
         # initialize state variables
@@ -66,26 +74,33 @@ class Recorder:
         """Initialize output directories."""
         self.output_video_dir = os.path.join(self.output_dir, "Video")
         self.output_bottom_video_dir = os.path.join(self.output_dir, "Bottom_Video")
-        os.makedirs(self.output_video_dir, exist_ok=True)
-        os.makedirs(self.output_bottom_video_dir, exist_ok=True)
+
+        if self.save_data:
+            os.makedirs(self.output_video_dir, exist_ok=True)
+            os.makedirs(self.output_bottom_video_dir, exist_ok=True)
 
     def _start_new_video(self) -> Tuple[cv2.VideoWriter, cv2.VideoWriter]:
         """Start new video writers for top and bottom cameras."""
         video_filename_top = os.path.join(
             self.output_video_dir, f"video_{self.video_counter}.mp4"
         )
-        video_writer_top = cv2.VideoWriter(
-            video_filename_top, self.FOURCC, self.FPS, self.image_top.shape[1::-1]
-        )
-
         video_filename_bottom = os.path.join(
             self.output_bottom_video_dir, f"video_{self.video_counter}.mp4"
         )
-        video_writer_bottom = cv2.VideoWriter(
-            video_filename_bottom, self.FOURCC, self.FPS, self.bottom_image.shape[1::-1]
-        )
 
-        return video_writer_top, video_writer_bottom
+
+        if self.save_data:
+            video_writer_top = cv2.VideoWriter(
+                video_filename_top, self.FOURCC, self.FPS, self.image_top.shape[1::-1]
+            )
+            video_writer_bottom = cv2.VideoWriter(
+                video_filename_bottom, self.FOURCC, self.FPS, self.bottom_image.shape[1::-1]
+            )
+
+            return video_writer_top, video_writer_bottom
+
+        else:
+            return None, None
 
     def record(self) -> None:
         """Record video with optional periodic video restarts."""
@@ -94,7 +109,8 @@ class Recorder:
             while not self.stop_flag:
                 if not self.pause:
                     self._update()
-                    self._capture_frame()
+                    if self.save_data:
+                        self._capture_frame()
                     if (
                         self.clip_length
                         and self.frame_counter % self.clip_length == 0
@@ -104,7 +120,8 @@ class Recorder:
                         self._start_or_restart_video_writers()
 
                     time.sleep(1 / self.FPS)
-                    self.save_state()
+                    if self.save_data:
+                        self.save_state()
                     self.frame_counter += 1
 
                     cv2.imshow(f"ImageBottom_{self.robot_idx}", self.bottom_image)
@@ -115,13 +132,13 @@ class Recorder:
         finally:
             self._release_writers()
             cv2.destroyAllWindows()
-    
+
     def _update(self) -> None:
         """Update images and state from the robot."""
         data = self.robot.get_all_states()
 
         self.image_top = data[0]
-        self.bottom_image = get_undistorted_bottom_image(self.robot, self.m, self.d)
+        self.bottom_image = get_undistorted_bottom_image(self.robot, self.camera_matrix, self.distortion_coeffs)
         self.state = data[2]
         self.timestamp = data[3]
 

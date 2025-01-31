@@ -2,25 +2,30 @@ from grasper import AutograsperBase, RobotActivity
 from library.rgb_object_tracker import (
     get_object_pos,
     all_objects_are_visible,
-    test_calibration
+    test_calibration,
 )
-from library.utils import OrderType, pick_random_positions, get_undistorted_bottom_image, clear_center, manual_control, run_calibration
+from library.utils import (
+    OrderType,
+    pick_random_positions,
+    get_undistorted_bottom_image,
+    clear_center,
+    manual_control,
+    run_calibration,
+)
 import numpy as np
 from typing import List, Tuple
 import time
 import random
 import ast
 
+
 class RandomGrasper(AutograsperBase):
     def __init__(
         self,
-        args,
         config,
         output_dir: str = "",
-        camera_matrix=None,
-        distortion_coeffs=None,
     ):
-        super().__init__(args, output_dir, camera_matrix, distortion_coeffs)
+        super().__init__(config, output_dir)
         # Task-specific initialization
         experiment_cfg = config["experiment"]
 
@@ -40,6 +45,31 @@ class RandomGrasper(AutograsperBase):
 
         self.time_between_orders = 1
 
+    def startup(self, position: List[float]):
+        self.robot.rotate(0)
+        startup_commands = [
+            (OrderType.GRIPPER_OPEN, []),
+            (OrderType.MOVE_Z, [1]),
+            (OrderType.MOVE_XY, position),
+        ]
+        self.queue_robot_orders(startup_commands, 1)
+        time.sleep(2)
+
+    def go_to_start(self):
+        positions = [[1, 0.7], [0, 0.7]]
+        positions = np.array(positions)
+        position = positions[1]
+        orders = [
+            (OrderType.MOVE_Z, [1]),
+            (OrderType.MOVE_XY, position),
+        ]
+        self.queue_robot_orders(orders, 1)
+        self.robot.gripper_close()
+        time.sleep(0.5)
+        self.robot.rotate(0)
+        time.sleep(0.5)
+
+
     def prepare_experiment(self, position_bank, stack_position):
         if position_bank is None:
             position_bank = [[0.2, 0.2], [0.8, 0.2], [0.8, 0.8]]
@@ -49,27 +79,21 @@ class RandomGrasper(AutograsperBase):
             stack_position = [0.5, 0.5]
 
         return position_bank, stack_position
-    
+
     def move_red_to_center(self):
- 
+
         target_color = "red"
         object_position = get_object_pos(
-            self.bottom_image, self.robot_idx, target_color)
-        self.pickup_and_place_object(
-            object_position,
-            0,
-            0,
-            target_position=[0.5,0.5]
+            self.bottom_image, self.robot_idx, target_color
         )
-
+        self.pickup_and_place_object(object_position, 0, 0, target_position=[0.5, 0.5])
 
     def perform_task(self):
 
-        
         # temp for testing refactor
         time.sleep(5)
         return
-        
+
         # test_calibration(self.bottom_image, ["red"])
         # self.robot.gripper_open()
 
@@ -78,37 +102,40 @@ class RandomGrasper(AutograsperBase):
 
         margin = 0.2
         # random_position = self.generate_new_block_position()
-        random_position = [0,0]
+        random_position = [0, 0]
 
-        d_x = np.random.uniform(-0.08,0.08)
-        d_y = np.random.uniform(-0.08,0.08)
+        d_x = np.random.uniform(-0.08, 0.08)
+        d_y = np.random.uniform(-0.08, 0.08)
 
         object_position = get_object_pos(
-            self.bottom_image, self.robot_idx, "green", debug=True)
-        
+            self.bottom_image, self.robot_idx, "green", debug=True
+        )
+
         random_position[0] = object_position[0] + d_x
         random_position[1] = object_position[1] + d_y
 
         x = random_position[0]
         y = random_position[1]
 
-
-
-        self.queue_robot_orders([
-            (OrderType.MOVE_XY, random_position),
-            (OrderType.GRIPPER_OPEN, []),
-            (OrderType.MOVE_Z, [0]),
-            (OrderType.GRIPPER_CLOSE, [])], delay=4.0
+        self.queue_robot_orders(
+            [
+                (OrderType.MOVE_XY, random_position),
+                (OrderType.GRIPPER_OPEN, []),
+                (OrderType.MOVE_Z, [0]),
+                (OrderType.GRIPPER_CLOSE, []),
+            ],
+            delay=4.0,
         )
 
-
         object_position = get_object_pos(
-            self.bottom_image, self.robot_idx, "green", debug=True)
+            self.bottom_image, self.robot_idx, "green", debug=True
+        )
         if (
             # abs(x - 0.5) > margin
             # and abs(y - 0.5) > margin
             # and np.linalg.norm(np.array(random_position) - np.array(object_position)) < 0.12
-            np.linalg.norm(np.array(random_position) - np.array(object_position)) < 0.12
+            np.linalg.norm(np.array(random_position) - np.array(object_position))
+            < 0.12
         ):
             self.failed = False
             print("succesful grasp")
@@ -126,7 +153,9 @@ class RandomGrasper(AutograsperBase):
             x = random.uniform(0.2, 0.8)
             y = random.uniform(0.2, 0.8)
             avoid_position = [0.5, 0.5]
-            dist = np.sqrt( np.pow(x - avoid_position[0], 2) + np.pow(y-avoid_position[1], 2) )
+            dist = np.sqrt(
+                np.pow(x - avoid_position[0], 2) + np.pow(y - avoid_position[1], 2)
+            )
 
             if dist > margin:
                 break
@@ -138,14 +167,15 @@ class RandomGrasper(AutograsperBase):
         self.robot.gripper_open()
         time.sleep(0.5)
         self.go_to_start()
-    
+
     def _reset_target_block(self):
 
         block_pos = self.generate_new_block_position()
 
         target_color = "green"
         object_position = get_object_pos(
-            self.bottom_image, self.robot_idx, target_color)
+            self.bottom_image, self.robot_idx, target_color
+        )
         self.pickup_and_place_object(
             object_position,
             0,
@@ -155,14 +185,16 @@ class RandomGrasper(AutograsperBase):
 
         margin = 0.1
         red_position = get_object_pos(
-            self.bottom_image, self.robot_idx, "red", debug=False)
+            self.bottom_image, self.robot_idx, "red", debug=False
+        )
 
         if abs(red_position[0] - 0.5) > margin and abs(red_position[1] - 0.5) > margin:
             self.move_red_to_center()
 
-
     def reset_task(self):
 
+        time.sleep(3)
+        return
         self._reset_target_block()
         self.go_to_start
 
@@ -180,7 +212,7 @@ class RandomGrasper(AutograsperBase):
             (OrderType.GRIPPER_OPEN, []),
             (OrderType.MOVE_Z, [1]),
             (OrderType.MOVE_XY, object_position),
-            #(OrderType.GRIPPER_OPEN, []),
+            # (OrderType.GRIPPER_OPEN, []),
             (OrderType.MOVE_Z, [object_height]),
             (OrderType.GRIPPER_CLOSE, []),
             (OrderType.MOVE_Z, [1]),
@@ -195,7 +227,8 @@ class RandomGrasper(AutograsperBase):
 
         # Define the arguments from the bash command
         args = [
-            "python", "real_eval.py",
+            "python",
+            "real_eval.py",
             "exp_name=moco_vit_small",
             "data_name=RM",
             "agent=vit_small",
@@ -203,7 +236,7 @@ class RandomGrasper(AutograsperBase):
             "checkpoint_path=/workspaces/CloudGripper_Stack_1k/assets/Policy/moco_resnet18/checkpoint_0.pth",
             "agent.features.model_type=moco",
             "devices=1",
-            "wandb.name=moco_vit_small_RM"
+            "wandb.name=moco_vit_small_RM",
         ]
 
         # Run the command
@@ -212,9 +245,6 @@ class RandomGrasper(AutograsperBase):
             print("Real-world evaluation completed successfully.")
         except subprocess.CalledProcessError as e:
             print(f"Error occurred: {e}")
-
-
-
 
     def stack_objects(self, colors, block_heights, stack_position):
         blocks = list(zip(colors, block_heights))
@@ -247,7 +277,6 @@ class RandomGrasper(AutograsperBase):
             )
 
             stack_height += block_height
-
 
     def reset_blocks(
         self,

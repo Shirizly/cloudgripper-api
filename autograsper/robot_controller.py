@@ -24,15 +24,13 @@ ERROR_EVENT = threading.Event()
 STATE_LOCK = threading.Lock()
 BOTTOM_IMAGE_LOCK = threading.Lock()
 
-TIME_BETWEEN_EXPERIMENTS = 10
-
-
 @dataclass
 class SharedState:
     """
-    Holds shared references between threads, e.g., 
+    Holds shared references between threads, e.g.,
     the current robot activity and the recorder.
     """
+
     state: str = RobotActivity.STARTUP
     recorder: Optional[Recorder] = None
     recorder_thread: Optional[threading.Thread] = None
@@ -41,27 +39,39 @@ class SharedState:
 
 class RobotController:
     """
-    Orchestrates the autograsper, manages recording, 
+    Orchestrates the autograsper, manages recording,
     and coordinates changes between states.
     """
 
     def __init__(self, args):
         self.args = args
         self.config = self._load_config(args.config)
-        self.experiment_name = ast.literal_eval(self.config["experiment"]["name"])
         self.shared_state = SharedState()
         self.autograsper = self._initialize_autograsper()
 
         # Threads
-        self.autograsper_thread: Optional[threading.Thread] = None,
+        self.autograsper_thread: Optional[threading.Thread] = (None,)
         self.monitor_thread: Optional[threading.Thread] = None
+
+    # --------------------
+    # Customize Autograsper
+    # --------------------
+
+    def _initialize_autograsper(self) -> AutograsperBase:
+        """Instantiates the Autograsper with config-based parameters."""
+
+        autograsper = RandomGrasper(
+            self.config,
+        )
+        return autograsper
 
     # --------------------
     # Public Methods
     # --------------------
+
     def run(self):
         """
-        Main controller entry point: starts threads, 
+        Main controller entry point: starts threads,
         monitors states, and wraps everything in try/finally.
         """
         try:
@@ -75,36 +85,26 @@ class RobotController:
     # --------------------
     # Private Methods
     # --------------------
+
     def _load_config(self, config_file: str):
         """Load and verify the configuration from a file."""
         import configparser
+
         parser = configparser.ConfigParser()
         parser.read(config_file)
         if not parser.sections():
             raise FileNotFoundError(f"Could not read config file at: {config_file}")
+
+        try:
+            experiment_cfg = parser["experiment"]
+            camera_cfg = parser["camera"]
+
+            self.experiment_name = ast.literal_eval(parser["experiment"]["name"])
+            self.timeout_between_experiments = ast.literal_eval(parser["experiment"]["timeout_between_experiments"])
+        except Exception as e:
+            raise ValueError("ERROR reading from config.ini: ", e)
+
         return parser
-
-    def _initialize_autograsper(self) -> AutograsperBase:
-        """Instantiates the Autograsper with config-based parameters."""
-        # (Example) read parameters from config
-        experiment_cfg = self.config["experiment"]
-        camera_cfg = self.config["camera"]
-
-        camera_matrix = np.array(ast.literal_eval(camera_cfg["m"]))
-        distortion_coeffs = np.array(ast.literal_eval(camera_cfg["d"]))
-
-        token = os.getenv("CLOUDGRIPPER_TOKEN")
-        if not token:
-            raise ValueError("CLOUDGRIPPER_TOKEN environment variable not set.")
-
-        autograsper = RandomGrasper(
-            self.args,
-            self.config,
-            output_dir="",
-            camera_matrix=camera_matrix,
-            distortion_coeffs=distortion_coeffs,
-        )
-        return autograsper
 
     def _start_threads(self):
         """Starts the main autograsper thread and state monitor thread."""
@@ -131,9 +131,14 @@ class RobotController:
         """Copies the latest bottom image from the recorder to the autograsper."""
         try:
             while not ERROR_EVENT.is_set():
-                if self.shared_state.recorder and self.shared_state.recorder.bottom_image is not None:
+                if (
+                    self.shared_state.recorder
+                    and self.shared_state.recorder.bottom_image is not None
+                ):
                     with BOTTOM_IMAGE_LOCK:
-                        self.autograsper.bottom_image = np.copy(self.shared_state.recorder.bottom_image)
+                        self.autograsper.bottom_image = np.copy(
+                            self.shared_state.recorder.bottom_image
+                        )
                 time.sleep(0.1)
         except Exception as e:
             self._handle_error(e)
@@ -141,7 +146,7 @@ class RobotController:
     def _handle_state_changes(self):
         """Main loop that responds to changes in robot state."""
         prev_state = RobotActivity.STARTUP
-        session_dir, task_dir, restore_dir = "", "", ""
+        self.session_dir, self.task_dir, self.restore_dir = "", "", ""
 
         while not ERROR_EVENT.is_set():
             with STATE_LOCK:
@@ -150,11 +155,11 @@ class RobotController:
                     self._on_state_transition(prev_state, current_state)
 
                     if current_state == RobotActivity.ACTIVE:
-                        session_dir, task_dir, restore_dir = self._create_new_data_point()
-                        self._on_active_state(task_dir)
+                        self._create_new_data_point()
+                        self._on_active_state()
 
                     if current_state == RobotActivity.RESETTING:
-                        self._on_resetting_state(session_dir, restore_dir)
+                        self._on_resetting_state()
 
                     if current_state == RobotActivity.FINISHED:
                         self._on_finished_state()
@@ -170,30 +175,32 @@ class RobotController:
             # Possibly pause the recorder if it exists
             if self.shared_state.recorder:
                 self.shared_state.recorder.pause = True
-                time.sleep(TIME_BETWEEN_EXPERIMENTS)
+                time.sleep(self.timeout_between_experiments)
                 self.shared_state.recorder.pause = False
 
-    def _create_new_data_point(self) -> Tuple[str, str, str]:
+    def _create_new_data_point(self):
         """Creates a new session folder with `task` and `restore` subfolders."""
-        base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recorded_data", self.experiment_name)
+        base_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "recorded_data",
+            self.experiment_name,
+        )
         if not os.path.exists(base_dir):
             os.makedirs(base_dir, exist_ok=True)
 
         session_ids = [int(x) for x in os.listdir(base_dir) if x.isdigit()]
         new_id = max(session_ids, default=0) + 1
-        session_dir = os.path.join(base_dir, str(new_id))
+        self.session_dir = os.path.join(base_dir, str(new_id))
 
-        task_dir = os.path.join(session_dir, "task")
-        restore_dir = os.path.join(session_dir, "restore")
-        os.makedirs(task_dir, exist_ok=True)
-        os.makedirs(restore_dir, exist_ok=True)
+        self.task_dir = os.path.join(self.session_dir, "task")
+        self.restore_dir = os.path.join(self.session_dir, "restore")
+        os.makedirs(self.task_dir, exist_ok=True)
+        os.makedirs(self.restore_dir, exist_ok=True)
 
-        return session_dir, task_dir, restore_dir
-
-    def _on_active_state(self, task_dir: str):
+    def _on_active_state(self):
         """Actions to perform when transitioning to ACTIVE."""
-        self.autograsper.output_dir = task_dir
-        self._ensure_recorder_running(task_dir)
+        self.autograsper.output_dir = self.task_dir
+        self._ensure_recorder_running(self.task_dir)
         time.sleep(0.5)
         self.autograsper.start_flag = True
 
@@ -201,38 +208,38 @@ class RobotController:
         """Ensures the recorder is created and running."""
         if not self.shared_state.recorder:
             self.shared_state.recorder = self._setup_recorder(output_dir)
-            self.shared_state.recorder_thread = threading.Thread(target=self.shared_state.recorder.record)
+            self.shared_state.recorder_thread = threading.Thread(
+                target=self.shared_state.recorder.record
+            )
             self.shared_state.recorder_thread.start()
 
-            self.shared_state.bottom_image_thread = threading.Thread(target=self._monitor_bottom_image)
+            self.shared_state.bottom_image_thread = threading.Thread(
+                target=self._monitor_bottom_image
+            )
             self.shared_state.bottom_image_thread.start()
 
         self.shared_state.recorder.start_new_recording(output_dir)
 
     def _setup_recorder(self, output_dir: str) -> Recorder:
         """Initializes and returns a Recorder instance based on config."""
-        
-        token = os.getenv("CLOUDGRIPPER_TOKEN")
-        robot_idx = self.args.robot_idx
 
         return Recorder(
             self.config,
             output_dir=output_dir,
-            token=token,
         )
 
-    def _on_resetting_state(self, session_dir: str, restore_dir: str):
+    def _on_resetting_state(self):
         """Actions when the robot transitions into RESETTING."""
         # Save success/fail status
         status = "fail" if self.autograsper.failed else "success"
-        with open(os.path.join(session_dir, "status.txt"), "w") as f:
+        with open(os.path.join(self.session_dir, "status.txt"), "w") as f:
             f.write(status)
         logger.info(f"Task result: {status}")
 
         # Switch recorder to new subfolder
-        self.autograsper.output_dir = restore_dir
+        self.autograsper.output_dir = self.restore_dir
         if self.shared_state.recorder:
-            self.shared_state.recorder.start_new_recording(restore_dir)
+            self.shared_state.recorder.start_new_recording(self.restore_dir)
 
     def _on_finished_state(self):
         """Actions when the robot transitions to FINISHED."""
@@ -240,9 +247,15 @@ class RobotController:
         if self.shared_state.recorder:
             self.shared_state.recorder.stop()
             time.sleep(1)
-            if self.shared_state.recorder_thread and self.shared_state.recorder_thread.is_alive():
+            if (
+                self.shared_state.recorder_thread
+                and self.shared_state.recorder_thread.is_alive()
+            ):
                 self.shared_state.recorder_thread.join()
-            if self.shared_state.bottom_image_thread and self.shared_state.bottom_image_thread.is_alive():
+            if (
+                self.shared_state.bottom_image_thread
+                and self.shared_state.bottom_image_thread.is_alive()
+            ):
                 self.shared_state.bottom_image_thread.join()
 
     def _cleanup(self):
