@@ -36,13 +36,17 @@ def find_matching_state(order, states, start_idx):
         state = states[idx]
 
         if order_type == "MOVE_XY":
-            if (len(order_value) == 2 and
-                compare_values(order_value[0], state["x_norm"]) and
-                compare_values(order_value[1], state["y_norm"])):
+            if (
+                len(order_value) == 2
+                and compare_values(order_value[0], state["x_norm"])
+                and compare_values(order_value[1], state["y_norm"])
+            ):
                 return idx
 
         elif order_type == "MOVE_Z":
-            if len(order_value) == 1 and compare_values(order_value[0], state["z_norm"]):
+            if len(order_value) == 1 and compare_values(
+                order_value[0], state["z_norm"]
+            ):
                 return idx
 
         elif order_type == "GRIPPER_OPEN":
@@ -52,10 +56,12 @@ def find_matching_state(order, states, start_idx):
 
         elif order_type == "GRIPPER_CLOSE":
             # Match with claw_norm close to 0.21/0.24/0.25/0.30
-            if (compare_values(0.30, state["claw_norm"]) or
-                compare_values(0.25, state["claw_norm"]) or
-                compare_values(0.24, state["claw_norm"]) or
-                compare_values(0.21, state["claw_norm"])):
+            if (
+                compare_values(0.30, state["claw_norm"])
+                or compare_values(0.25, state["claw_norm"])
+                or compare_values(0.24, state["claw_norm"])
+                or compare_values(0.21, state["claw_norm"])
+            ):
                 return idx
 
     return None
@@ -90,7 +96,7 @@ def compute_final_order_from_matches(matching_states):
             "y_norm": 0.7,
             "z_norm": 1.0,
             "rotation": 0.0,
-            "claw_norm": 0.0
+            "claw_norm": 0.0,
         }
 
     # Start from the first state's values
@@ -103,7 +109,7 @@ def compute_final_order_from_matches(matching_states):
         "claw_norm": first_state.get("claw_norm", 0.0),
     }
 
-    for (order, _, _) in matching_states:
+    for order, _, _ in matching_states:
         # If there's no "order_type", it's a special pair (like final),
         # skip it so we don't re-apply final pair logic
         if isinstance(order, dict) and "order_type" in order:
@@ -147,18 +153,18 @@ def process_task(task_dir):
         first_state, second_state = states[0], states[1]
 
         if (
-            abs(first_state['x_norm'] - second_state['x_norm']) < epsilon and
-            abs(first_state['y_norm'] - second_state['y_norm']) < epsilon
+            abs(first_state["x_norm"] - second_state["x_norm"]) < epsilon
+            and abs(first_state["y_norm"] - second_state["y_norm"]) < epsilon
         ):
             first_addition = first_state
         else:
             first_addition = second_state
 
         # Standardize starting values to cover sensor noise
-        first_addition['x_norm'] = 0.0
-        first_addition['y_norm'] = 0.7
-        first_addition['z_norm'] = 1.0
-        first_addition['claw_norm'] = 0.0
+        first_addition["x_norm"] = 0.0
+        first_addition["y_norm"] = 0.7
+        first_addition["z_norm"] = 1.0
+        first_addition["claw_norm"] = 0.0
 
         # Insert as if it matched the first order
         matching_states.append((orders[0], 1, first_addition))
@@ -167,7 +173,7 @@ def process_task(task_dir):
     for order in orders:
         if order["order_type"] == "MOVE_XY":
             # Ensure no negative XY
-            order["order_value"] = [max(0,n) for n in order["order_value"]]
+            order["order_value"] = [max(0, n) for n in order["order_value"]]
 
         match_index = find_matching_state(
             order,
@@ -180,7 +186,7 @@ def process_task(task_dir):
         else:
             # If we can't match but order is GRIPPER_CLOSE, push to last known state
             if order["order_type"] == "GRIPPER_CLOSE" and states:
-                matching_states.append((order, len(states)-1, states[-1]))
+                matching_states.append((order, len(states) - 1, states[-1]))
             else:
                 # If an order can't be matched, break out
                 break
@@ -188,11 +194,13 @@ def process_task(task_dir):
     # 4) Compute the "final" order from all matched states
     final_order_dict = compute_final_order_from_matches(matching_states)
 
-    # 5) Inject a special final pair: 
+    # 5) Inject a special final pair:
     #    ( final_order_dict, final_video_frame_index, final_order_dict )
     #    This ensures the final frame is the absolute last from the video data.
     #    We use the same dict for 'order' and 'state' (no "order_type").
-    matching_states.append((final_order_dict, final_video_frame_index, final_order_dict))
+    matching_states.append(
+        (final_order_dict, final_video_frame_index, final_order_dict)
+    )
 
     return matching_states
 
@@ -232,10 +240,10 @@ def save_results(task_dir, results):
         # Detect if this is the special final pair (no "order_type")
         if isinstance(order, dict) and "order_type" not in order:
             # Overwrite the current_order with the final dict
-            current_order["x_norm"]    = order["x_norm"]
-            current_order["y_norm"]    = order["y_norm"]
-            current_order["z_norm"]    = order["z_norm"]
-            current_order["rotation"]  = order["rotation"]
+            current_order["x_norm"] = order["x_norm"]
+            current_order["y_norm"] = order["y_norm"]
+            current_order["z_norm"] = order["z_norm"]
+            current_order["rotation"] = order["rotation"]
             current_order["claw_norm"] = order["claw_norm"]
         else:
             # Normal path for recognized order_type
@@ -263,7 +271,7 @@ def save_results(task_dir, results):
                 "z_norm": round(current_order.get("z_norm", 0), 2),
                 "rotation": round(current_order.get("rotation", 0), 2),
                 "claw_norm": round(current_order.get("claw_norm", 0), 2),
-            }
+            },
         }
 
         # Separate state entry
@@ -393,7 +401,7 @@ def main(root_dir):
     task_dirs = [
         os.path.join(base_dir, d, "task")
         for d in sorted(
-            os.listdir(base_dir), key=lambda x: int(x) if x.isdigit() else float('inf')
+            os.listdir(base_dir), key=lambda x: int(x) if x.isdigit() else float("inf")
         )
         if d.isdigit() and os.path.isdir(os.path.join(base_dir, d, "task"))
     ]
@@ -432,6 +440,3 @@ def main(root_dir):
 if __name__ == "__main__":
     root_dir = "."
     main(root_dir)
-
-
-
