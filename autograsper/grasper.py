@@ -62,6 +62,10 @@ class AutograsperBase(ABC):
 
         self.robot = self.initialize_robot(self.robot_idx, self.token)
 
+        self.bottom_image = get_undistorted_bottom_image(
+            self.robot, self.camera_matrix, self.distortion_coeffs
+        )
+
     @staticmethod
     def initialize_robot(robot_idx: int, token: str) -> GripperRobot:
         try:

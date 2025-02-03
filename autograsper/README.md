@@ -1,206 +1,278 @@
-# Project Documentation
+# Cloudgripper-Autograsper
+
+  
+Cloudgripper-Autograsper is a framework for orchestrating robotic grasping tasks, controlling a CloudGripper robot, and recording data (images, states) from the robot's cameras.
+
+
+---
+
+  
 
 ## Table of Contents
 
-1. [Introduction](#introduction)
-2. [Modules Overview](#modules-overview)
-   - [library/utils.py](#libraryutilspy)
-   - [stack_from_scratch/autograsper.py](#stack_from_scratchautograsperpy)
-   - [stack_from_scratch/recording.py](#stack_from_scratchrecordingpy)
-   - [stack_from_scratch/collect_data_stacking.py](#stack_from_scratchcollect_data_stackingpy)
-3. [Usage](#usage)
-4. [Dependencies](#dependencies)
+  
 
-## Introduction
+1. [Main Components](#main-components)
 
-This project involves automation of robotic stacking tasks using a CloudGripper robot. Includes robot control and data collection.
+- [Coordinator](#coordinatorpy)
 
-### **Featuring:**
+- [Recording](#recordingpy)
 
-- **utils**: a set of general functions intended for any project.
-- **autograsper**: an example of scheduling a loop of stacking tasks, can be used as template for robot control.
-- **recorder**: a class that records all robot data during tasks and stores it in a clear and structured way.
-- **stacking_data_collection**: an example of using all above to perform and record a large number of robot tasks.
+- [Autograsper Base](#grasperpy)
 
-## Modules Overview
+- [Example Grasper](#example_grasperpy)
 
-### library/utils.py
+2. [Prerequisites and Installation](#prerequisites-and-installation)
 
-The utils module provides a set of standard functions intented to be useful with any project
+3. [Configuration](#configuration)
+  
 
-#### Enums
+---
 
-- `OrderType`: Enum to define different types of robot orders (MOVE_XY, MOVE_Z, GRIPPER_CLOSE, GRIPPER_OPEN).
+  
 
-#### Functions
+  
 
-- `save_state(robot, output_dir, start_time, previous_order)`: Saves the current state of the robot.
-- `execute_order(robot, order, output_dir, start_time, reverse_xy)`: Executes a single order on the robot.
-- `queue_orders(robot, order_list, time_between_orders, output_dir, start_time, reverse_xy)`: Queues and executes a list of orders sequentially.
-- `queue_orders_with_input(robot, order_list, output_dir, start_time)`: Queues and executes orders with user input between commands.
-- `snowflake_sweep(robot)`: Performs a snowflake sweep pattern with the robot.
-- `sweep_straight(robot)`: Performs a straight sweep pattern with the robot.
-- `recover_gripper(robot)`: Recovers the gripper by fully opening and then closing it.
-- `generate_position_grid()`: Generates a grid of positions.
-- `pick_random_positions(position_bank, n_layers, object_size, avoid_positions)`: Picks random positions from a grid.
-- `get_undistorted_bottom_image(robot, m, d)`: Gets an undistorted image from the robot's camera.
+## Main Components
 
-### stack_from_scratch/autograsper.py
+  
 
-The autograsper module is an example usage of the utils functions that scripts a theoretically boundless number of stacking tasks for the CloudGripper robot.
+Below is a summary of the core scripts and their roles. 
 
-#### Classes
+Detailed documentation of code in the: `library/`, `client/`, and `custom_graspers/` folders is under development, for now you can take a look in the files directly.
 
-- `RobotActivity`: Enum to define different states of the robot (ACTIVE, RESETTING, FINISHED, STARTUP).
-- `Autograsper`: Main class to handle the autograsping process.
+  
 
-#### Methods
+### `coordinator.py`
 
-- `__init__(self, args, output_dir)`: Initializes the Autograsper.
-- `pickup_and_place_object(self, object_position, object_height, target_height, target_position, time_between_orders)`: Picks up and places an object.
-- `reset(self, block_positions, block_heights, stack_position, time_between_orders)`: Resets the blocks to their initial positions.
-- `clear_center(self)`: Clears the center area of the workspace.
-- `startup(self, position)`: Performs a startup sequence at a given position.
-- `run_grasping(self)`: Runs the main grasping loop.
+**Key Responsibilities**:
 
-#### Main Execution
+- Manages threads for the grasper (autograsper logic) and recorder.
 
-- Sets up command-line argument parsing and initializes the `Autograsper` instance to start the grasping process.
+- Coordinates shared state between threads.
 
-### stack_from_scratch/recording.py
+- Handles global error events.
 
-#### Classes
+- **Customization**: Generally only changed to specify which custom grasper to use. You should not have to change this code other than which grasper is imported and initialized (unless you find general improvements or bug fixes!).
 
-- `Recorder`: Main class to handle the recording of the robot's actions.
 
-#### Methods
+**Core Classes / Structures**:
 
-- `__init__(self, session_id, output_dir, m, d, token, idx)`: Initializes the Recorder.
-- `_start_new_video(self, output_video_dir, output_bottom_video_dir, video_counter, fourcc, image_shape, bottom_image_shape)`: Starts a new video recording session.
-- `record(self, clip_length)`: Records the robot's actions.
-- `_initialize_directories(self)`: Initializes the directories for saving recordings.
-- `start_new_recording(self, new_output_dir)`: Starts a new recording in a different directory.
-- `stop(self)`: Stops the recording process.
+- `SharedState`: A dataclass holding references to the current robot activity state and the recorder.
 
-#### Main Execution
+- `GrasperRecorderCoordinator`: The main manager. Initializes the Autograsper, sets up recording, and handles lifecycle events.
 
-- Sets up command-line argument parsing and initializes the `Recorder` instance to start recording.
+  
+### `recording.py`
 
-### stack_from_scratch/collect_data_stacking.py
+**Key Responsibilities**:
 
-#### Functions
+- Encapsulates logic for recording data from the robot.
 
-- `get_new_session_id(base_dir)`: Generates a new session ID based on existing directories.
-- `run_autograsper(autograsper)`: Runs the autograsper process.
-- `setup_recorder(output_dir, robot_idx)`: Sets up the recorder with given parameters.
-- `run_recorder(recorder)`: Runs the recorder process.
-- `state_monitor(autograsper)`: Monitors the state of the autograsper.
+- Handles camera capture (top and bottom camera), encoding, and saving to disk.
 
-#### Main Execution
+- Records additional robot state info into JSON files.
 
-- Sets up command-line argument parsing and initializes the `Autograsper` and `Recorder` instances to run in parallel. It monitors their states and manages session directories.
+  
+### `grasper.py`
 
-# Usage Guide
+**Key Responsibilities**:
 
-## Setting Up Your Environment
+- Defines the base class (`AutograsperBase`) for any custom grasper logic.
 
-### Step 1: Install Dependencies
+- Contains shared utility for robot movement (such as `queue_robot_orders`).
 
-Ensure you have Python 3.x installed. Install the required Python packages using pip:
+- Manages an enum `RobotActivity` to define states like `STARTUP`, `ACTIVE`, `RESETTING`, and `FINISHED`.
 
-```sh
-pip install numpy opencv-python python-dotenv
+  
+
+**Class**:
+
+- `AutograsperBase`: **Abstract**. Requires subclasses to implement:
+
+- `recover_after_fail()`
+
+- `perform_task()`
+
+- `reset_task()`
+
+- `startup()`
+
+- `go_to_start()`
+
+  
+
+Subclasses must provide the actual logic for picking, placing, or any manipulations needed.
+
+  
+
+### `example_grasper.py`
+
+**Key Responsibilities**:
+
+- Demonstrates a simple pick-and-place task flow.
+
+- Provides a reference for how to implement a custom grasper by extending `AutograsperBase`.
+
+- Example tasks include:
+
+- Moving the robot to a start position.
+
+- Picking an object of a specified color.
+
+- Placing it at a target position.
+
+- Handling success/failure states.
+
+  
+
+---
+
+  
+
+## Prerequisites and Installation
+
+### Option 1: Devcontainer (recommended)
+
+**Prerequisite: Docker**
+
+Using devcontainers to run the code is recommended due to its reproducibility. If all share identical environments, a whole swathe of error reasons can be ruled out when troubleshooting.
+
+Devcontainers are well integrated in **VS Code** (possibly other IDEs) and can be set up in **NVIM** as well.
+
+##### VS Code
+Upon opening the project you will be prompted if you wish to reopen it in a devcontainer since a `.devcontainer` folder is present in the root directory. Accept and wait (possibly a few minutes the first time) while the container builds.
+
+[Tutorial if needed](https://code.visualstudio.com/docs/devcontainers/tutorial)
+
+  After the devcontainer is built, run:
+`pip install -r requirements.txt`
+inside the devcontainer terminal.
+### Option 2: Virtual environment
+
+1. **Python 3.7+** (Recommended 3.8 or higher).
+2. **pip** for Python package management.
+
+**Step-by-step**:
+
+```bash
+
+# 1. Clone the repository
+
+git clone https://github.com/YourOrganization/Cloudgripper-Autograsper.git
+
+cd Cloudgripper-Autograsper
+
+  
+
+# 2. Create a virtual environment (optional but recommended)
+
+python -m venv venv
+
+source venv/bin/activate # Linux/Mac
+
+# OR for Windows: venv\Scripts\activate
+
+  
+
+# 3. Install required packages
+
+pip install -r requirements.txt
 ```
 
-### Step 2: Set Environment Variables
 
-The code requires an environment variable `CLOUDGRIPPER_TOKEN` to authenticate with the GripperRobot API. Create a `.env` file in the project root with the following content:
+## Configuration
 
-```env
-CLOUDGRIPPER_TOKEN=your_CLOUDGRIPPER_TOKEN_here
+Common system configuration can be performed in the `autograsper/config.ini` file. For more custom configuration of recording and coordination, changes have to be performed to their respective classes.
+
+#### **The following parameters are easily configured:**
+
+- **`timeout_between_experiments`**: Optional. The time (in seconds) to wait between experiments. Useful if the API call limit is hit frequently.
+- **`default_action_delay`**: The delay (in seconds) between sequential actions to ensure the robot can properly execute each command before the next is given.
+- **`robot_idx`**: The identifier for the Cloudgripper robot you intend to use.
+- **`name`**: A descriptive name for the current experiment. This will be the folder name of the recorded data, useful for splitting up experiments.
+
+#### Task specific configurations 
+You can also put task specific settings in this file. The example file holds information about two blocks and some positions:
+
+- **`colors`**: A list of object colors used in the experiment.
+- **`block_heights`**: A list of heights for each object/block to be grasped.
+- **`position_bank`**: A set of pre-defined positions where objects may be placed.
+- **`stack_position`**: The target position for stacking objects.
+- **`object_size`**: The size of the objects to be grasped.
+
+#### Camera settings
+
+- **`record`**: Whether to enable recording of video data (`True` or `False`). When set to false, real time continuous viewing of the robot bottom camera will still be active, however no data will be stored on file. 
+- **`fps`**: The frame rate (frames per second) at which camera and robot state data are queried.
+- **`m`**: The camera's intrinsic matrix, used for calibrating image capture. **Should not be changed**.
+- **`d`**: The distortion coefficients for correcting lens distortion. **Should not be changed**.
+- **`clip_length`**: This setting is optional. If set to a positive integer `x`, the `recorder` module will split the video data into files containing `x` frames. This could be useful when performing a very long (possibly endless) task and not wanting to store the whole video in memory.
+
+
+## Configuring Task and Gripper Behavior
+
+To define a custom task or change the robot's behavior, you must implement a new class that extends the abstract base class `AutograsperBase`. This allows you to customize task logic such as picking, placing, and resetting objects during experiments.
+
+### Steps to Define a Custom Grasper
+
+1. **Create a new file** in the `custom_graspers/` directory (e.g., `my_custom_grasper.py`).
+2. **Implement the required methods** by extending `AutograsperBase`. For example:
+
+```python
+from grasper import AutograsperBase, RobotActivity
+from library.utils import OrderType, get_object_pos, queue_orders
+from typing import List, Tuple
+
+class MyCustomGrasper(AutograsperBase):
+
+   # this example is missing some details, for a working example see custom_graspers/example_grasper.py
+    
+    def startup(self):
+        """Initialize anything needed for the task, e.g., calibration."""
+        print("Starting up custom task.")
+
+    def go_to_start(self):
+        """Move the robot to a safe start position."""
+        orders = [
+            (OrderType.MOVE_Z, [1]), 
+            (OrderType.MOVE_XY, [0, 0.7]),
+            (OrderType.GRIPPER_CLOSE, [])
+        ]
+        self.queue_robot_orders(orders)
+
+    def perform_task(self):
+        """Define the core task logic, e.g., pick and place."""
+        object_position = get_object_pos(self.bottom_image, self.robot_idx, "green")
+        target_position = [0.5, 0.5]
+
+        # Generate a series of orders to pick and place the object
+        orders = [
+            (OrderType.GRIPPER_OPEN, []),
+            (OrderType.MOVE_XY, object_position),
+            (OrderType.MOVE_Z, [0.1]),
+            (OrderType.GRIPPER_CLOSE, []),
+            (OrderType.MOVE_Z, [1]),
+            (OrderType.MOVE_XY, target_position),
+            (OrderType.GRIPPER_OPEN, []),
+        ]
+
+        self.queue_robot_orders(orders)
+
+    def recover_after_fail(self):
+        """Handle errors and move the robot to a safe state."""
+        print("Recovering from task failure...")
+
+    def reset_task(self):
+        """Reset the task environment to prepare for the next run."""
+        self.go_to_start()
+
 ```
 
-## Running the Code
+1. **Update the Coordinator** (`coordinator.py`) to use your new grasper class. Modify the `_initialize_autograsper` method to return an instance of your custom class:
+```python
+from custom_graspers.my_custom_grasper import MyCustomGrasper
 
-### Running the Autograsper
-
-The `autograsper.py` script is controls the robot to perform stacking tasks. Can be used as a template for scheduled robot control.
-
-1. **Command-Line Arguments**:
-
-   - `--robot_idx`: The index of the robot to be controlled.
-   - `--output_dir`: The directory to save state data.
-
-2. **Example Command**:
-
-   ```sh
-   python stack_from_scratch/autograsper.py --robot_idx 1 --output_dir /path/to/output
-   ```
-
-3. **Description**:
-   - Initializes the `Autograsper` class.
-   - Runs the main grasping loop, where the robot performs a series of tasks such as moving, gripping, and placing objects.
-   - Saves the state of the robot after each action for later analysis.
-
-### Recording the Robot's Actions
-
-The `recording.py` script records the robot's actions, capturing both top and bottom camera views.
-
-1. **Command-Line Arguments**:
-
-   - `--robot_idx`: The index of the robot to be recorded.
-   - `--output_dir`: The directory to save recorded videos and final images.
-
-2. **Example Command**:
-
-   ```sh
-   python stack_from_scratch/recording.py --robot_idx 1 --output_dir /path/to/output
-   ```
-
-3. **Description**:
-   - Initializes the `Recorder` class.
-   - Records the robot's actions, saving video files at specified intervals.
-   - Displays the bottom camera view and waits for user input to stop recording.
-
-### Example: Collecting Data for Stacking
-
-The `collect_data_stacking.py` script combines the functionality of `autograsper.py` and `recording.py` to automate data collection for stacking tasks.
-
-1. **Command-Line Arguments**:
-
-   - `--robot_idx`: The index of the robot to be controlled and recorded.
-
-2. **Example Command**:
-
-   ```sh
-   python stack_from_scratch/collect_data_stacking.py --robot_idx 1
-   ```
-
-3. **Description**:
-   - Initializes the `Autograsper` and `Recorder` classes.
-   - Runs the autograsper and recorder in parallel threads.
-   - Monitors the state of the autograsper and manages recording sessions based on the robot's activity state.
-   - Creates new data points and organizes the output into structured directories.
-
-#### Detailed Workflow
-
-1. **Initialization**:
-
-   - The `Autograsper` initializes with command-line arguments, setting up the robot and its parameters.
-   - The `Recorder` initializes with a session ID, output directory, camera calibration parameters, and robot token.
-
-2. **Running the Autograsper**:
-
-   - The autograsper performs a series of actions such as moving to specific coordinates, opening and closing the gripper, and stacking objects.
-   - Each action's state is saved for later analysis.
-
-3. **Recording Sessions**:
-
-   - The recorder captures video frames from the robot's cameras.
-   - Videos are saved in the specified output directory.
-   - The bottom camera view is displayed for real-time monitoring.
-
-4. **State Monitoring**:
-   - The `collect_data_stacking.py` script monitors the autograsper's state.
-   - When the robot's state changes, the script handles the transition, creating new data points and managing recording sessions accordingly.
-   - The script ensures that recording continues seamlessly through state changes, such as resetting or completing tasks.
+def _initialize_autograsper(self) -> AutograsperBase:
+    return MyCustomGrasper(self.config)
+```
