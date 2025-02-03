@@ -15,10 +15,12 @@ class GripperRobot:
         name (str): The name of the robot.
         headers (dict): The headers to be sent with each API request.
         base_api (str): The base API URL for the robot.
-        order_count (int): Counter for the number of orders sent to the robot.
     """
 
-    api_address_robots = {f"robot{i}": f"https://cloudgripper.eecs.kth.se:8443/robot{i}/api/v1.1/robot" for i in range(1, 33)}
+    api_address_robots = {
+        f"robot{i}": f"https://cloudgripper.eecs.kth.se:8443/robot{i}/api/v1.1/robot"
+        for i in range(1, 33)
+    }
 
     def __init__(self, name: str, token: str):
         """
@@ -31,7 +33,6 @@ class GripperRobot:
         self.name = name
         self.headers = {"apiKey": token}
         self.base_api = self.api_address_robots[name]
-        self.order_count = 0
 
     def _make_request(self, endpoint: str) -> Optional[Dict[str, Any]]:
         """
@@ -212,9 +213,7 @@ class GripperRobot:
             print(f"Image decoding failed: {e}")
             return None
 
-    def _get_image(
-        self, endpoint: str
-    ) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    def _get_image(self, endpoint: str) -> Tuple[Optional[np.ndarray], Optional[str]]:
         """
         Retrieve an image from the robot's camera.
 
