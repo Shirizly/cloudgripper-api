@@ -11,6 +11,7 @@ from typing import Optional, Tuple
 # -------------
 from grasper import RobotActivity, AutograsperBase
 from custom_graspers.random_grasping_task import RandomGrasper
+from custom_graspers.example_grasper import ExampleGrasper
 from library.rgb_object_tracker import all_objects_are_visible
 from recording import Recorder
 
@@ -36,7 +37,7 @@ class SharedState:
     bottom_image_thread: Optional[threading.Thread] = None
 
 
-class GrasperRecorderCoordinator:
+class DataCollectionCoordinator:
     """
     Orchestrates the autograsper, manages recording,
     and coordinates changes between states.
@@ -59,7 +60,7 @@ class GrasperRecorderCoordinator:
     def _initialize_autograsper(self) -> AutograsperBase:
         """Instantiates the Autograsper with config-based parameters."""
 
-        autograsper = RandomGrasper(
+        autograsper = ExampleGrasper(
             self.config,
         )
         return autograsper
@@ -120,6 +121,9 @@ class GrasperRecorderCoordinator:
         try:
             while not ERROR_EVENT.is_set():
                 with STATE_LOCK:
+
+                    self._check_if_record_is_requested()
+
                     if self.shared_state.state != self.autograsper.state:
                         self.shared_state.state = self.autograsper.state
                         logger.info(f"State changed to: {self.shared_state.state}")
@@ -128,6 +132,15 @@ class GrasperRecorderCoordinator:
                 time.sleep(0.1)
         except Exception as e:
             self._handle_error(e)
+    
+    def _check_if_record_is_requested(self):
+        if self.autograsper.request_state_record and self.shared_state.recorder is not None:
+            if self.shared_state.recorder:
+                self.shared_state.recorder.take_snapshot += 1
+            while self.shared_state.recorder.take_snapshot > 0:
+                time.sleep(0.1)
+            self.autograsper.request_state_record = False
+
 
     def _monitor_bottom_image(self):
         """Copies the latest bottom image from the recorder to the autograsper."""
