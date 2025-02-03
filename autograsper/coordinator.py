@@ -10,8 +10,7 @@ from typing import Optional, Tuple
 
 # -------------
 from grasper import RobotActivity, AutograsperBase
-from stacking_autograsper import StackingAutograsper
-from random_grasping_task import RandomGrasper
+from custom_graspers.random_grasping_task import RandomGrasper
 from library.rgb_object_tracker import all_objects_are_visible
 from recording import Recorder
 
@@ -37,7 +36,7 @@ class SharedState:
     bottom_image_thread: Optional[threading.Thread] = None
 
 
-class RobotController:
+class GrasperRecorderCoordinator:
     """
     Orchestrates the autograsper, manages recording,
     and coordinates changes between states.
@@ -99,8 +98,11 @@ class RobotController:
             experiment_cfg = parser["experiment"]
             camera_cfg = parser["camera"]
 
-            self.experiment_name = ast.literal_eval(parser["experiment"]["name"])
-            self.timeout_between_experiments = ast.literal_eval(parser["experiment"]["timeout_between_experiments"])
+            self.experiment_name = ast.literal_eval(experiment_cfg["name"])
+            self.timeout_between_experiments = ast.literal_eval(experiment_cfg["timeout_between_experiments"])
+
+            self.save_data = bool(ast.literal_eval(camera_cfg["record"]))
+
         except Exception as e:
             raise ValueError("ERROR reading from config.ini: ", e)
 
@@ -155,7 +157,8 @@ class RobotController:
                     self._on_state_transition(prev_state, current_state)
 
                     if current_state == RobotActivity.ACTIVE:
-                        self._create_new_data_point()
+                        if self.save_data:
+                            self._create_new_data_point()
                         self._on_active_state()
 
                     if current_state == RobotActivity.RESETTING:
@@ -199,7 +202,9 @@ class RobotController:
 
     def _on_active_state(self):
         """Actions to perform when transitioning to ACTIVE."""
-        self.autograsper.output_dir = self.task_dir
+        if self.save_data:
+            self.autograsper.output_dir = self.task_dir
+
         self._ensure_recorder_running(self.task_dir)
         time.sleep(0.5)
         self.autograsper.start_flag = True
@@ -218,7 +223,8 @@ class RobotController:
             )
             self.shared_state.bottom_image_thread.start()
 
-        self.shared_state.recorder.start_new_recording(output_dir)
+        if self.save_data:
+            self.shared_state.recorder.start_new_recording(output_dir)
 
     def _setup_recorder(self, output_dir: str) -> Recorder:
         """Initializes and returns a Recorder instance based on config."""
@@ -232,14 +238,16 @@ class RobotController:
         """Actions when the robot transitions into RESETTING."""
         # Save success/fail status
         status = "fail" if self.autograsper.failed else "success"
-        with open(os.path.join(self.session_dir, "status.txt"), "w") as f:
-            f.write(status)
         logger.info(f"Task result: {status}")
 
-        # Switch recorder to new subfolder
-        self.autograsper.output_dir = self.restore_dir
-        if self.shared_state.recorder:
-            self.shared_state.recorder.start_new_recording(self.restore_dir)
+        if self.save_data:
+            with open(os.path.join(self.session_dir, "status.txt"), "w") as f:
+                f.write(status)
+
+            self.autograsper.output_dir = self.restore_dir
+
+            if self.shared_state.recorder:
+                self.shared_state.recorder.start_new_recording(self.restore_dir)
 
     def _on_finished_state(self):
         """Actions when the robot transitions to FINISHED."""
