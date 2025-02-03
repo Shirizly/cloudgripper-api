@@ -27,7 +27,7 @@ Autograsper is a toolkit and framework for controlling, observing, and setting u
 1. **Clone the Repository:**
 
 ```bash
-git clone
+git clone https://github.com/axel-kaliff/cloudgripper-api
 cd cloudgripper-api
 ```
 
@@ -213,7 +213,7 @@ More advanced examples can be found in the `custom_graspers` directory. This inc
 **Q: Video files are missing or incomplete.**  
 **A:** Ensure that the output directories have proper write permissions and that the camera calibration parameters in your configuration are correct.
 
-_For more detailed troubleshooting, please refer to the [Issues](https://github.com/yourusername/autograsper/issues) section on GitHub._
+_For more detailed troubleshooting, please refer to the [Issues](https://github.com/axel-kaliff/cloudgripper-api/issues) section on GitHub._
 
 ## Contributing
 
