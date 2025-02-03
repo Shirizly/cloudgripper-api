@@ -6,9 +6,6 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 
-# TODO replace with evdev for wayland compatability
-# from pynput import keyboard
-
 from client.cloudgripper_client import GripperRobot
 from library.calibration import undistort
 
@@ -18,6 +15,7 @@ class OrderType(Enum):
     MOVE_Z = 2
     GRIPPER_CLOSE = 3
     GRIPPER_OPEN = 4
+    ROTATE = 5
 
 
 def write_order(
@@ -83,7 +81,8 @@ def execute_order(
     try:
         order_type, order_value = order
 
-        order_value = np.clip(order_value, 0, 1)
+        if order_type is not OrderType.ROTATE:
+            order_value = np.clip(order_value, 0, 1)
 
         start_time = 0
 
@@ -92,17 +91,15 @@ def execute_order(
 
         if order_type == OrderType.MOVE_XY:
             start_time = robot.move_xy(order_value[0], order_value[1])
-            robot.order_count += 1
         elif order_type == OrderType.MOVE_Z:
             start_time = robot.move_z(order_value[0])
-            robot.order_count += 1
+        elif order_type == OrderType.ROTATE:
+            start_time = robot.rotate(order_value[0])
         elif order_type == OrderType.GRIPPER_OPEN:
             start_time = robot.gripper_open()
-            robot.order_count += 1
         elif order_type == OrderType.GRIPPER_CLOSE:
             if len(order_value) != 0:
                 start_time = robot.move_gripper(order_value[0])
-                robot.order_count += 1
             else:
                 current_position = 0.3
                 end_position = 0.24
@@ -110,7 +107,6 @@ def execute_order(
                 wait_time = 0.1
                 start_time = robot.move_gripper(current_position)
                 while current_position >= end_position:
-                    robot.order_count += 1
                     robot.move_gripper(current_position)
                     time.sleep(wait_time)
                     current_position -= step
@@ -118,7 +114,7 @@ def execute_order(
         if output_dir != "":
             write_order(output_dir, start_time, order)
 
-            time.sleep(1)  # buffer time
+            time.sleep(0.5)  # buffer time
 
     except (IndexError, ValueError) as e:
         print(f"Error executing order {order}: {e}")
@@ -341,14 +337,12 @@ def convert_ndarray_to_list(obj: Any) -> Any:
         return obj
 
 
-# TODO replace pynput with evdev
-# def manual_control(robot):
-#     print("TODO replace pynpyt with evdev")
 def manual_control(robot):
     """
     Manually control the robot using keyboard inputs.
     """
     from pynput import keyboard
+
     current_x = 0.0
     current_y = 0.0
     current_z = 0.0
