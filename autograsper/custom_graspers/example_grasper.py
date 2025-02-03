@@ -41,7 +41,7 @@ class ExampleGrasper(AutograsperBase):
 
     def startup(self):
         # This method will execute at the beginning of every experiment.
-        # During this phase, data will not be recorded.
+        # During this phase, data will not be recorded or shown in real time.
 
         print("performing startup tasks...")
 
