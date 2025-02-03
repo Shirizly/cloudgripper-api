@@ -16,7 +16,7 @@ if project_root not in sys.path:
 
 # Import project-specific modules
 from client.cloudgripper_client import GripperRobot
-from library.utils import OrderType, queue_orders, clear_center, get_undistorted_bottom_image, execute_order
+from library.utils import OrderType, get_undistorted_bottom_image, execute_order
 
 # Load environment variables
 load_dotenv()
@@ -103,6 +103,9 @@ class AutograsperBase(ABC):
                 print(f"Unexpected error during perform_task: {e}")
                 self.failed = True
                 raise
+
+            if self.state == RobotActivity.FINISHED:
+                break
 
             time.sleep(self.task_time_margin) 
             self.state = RobotActivity.RESETTING
