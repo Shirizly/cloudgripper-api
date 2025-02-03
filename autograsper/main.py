@@ -2,7 +2,7 @@ import logging
 import argparse
 import sys
 
-from coordinator import GrasperRecorderCoordinator
+from coordinator import DataCollectionCoordinator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ def parse_arguments() -> argparse.Namespace:
 
 def main():
     args = parse_arguments()
-    controller = GrasperRecorderCoordinator(args)
+    controller = DataCollectionCoordinator(args)
     controller.run()
 
 
