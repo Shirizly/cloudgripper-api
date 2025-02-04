@@ -1,5 +1,4 @@
 from grasper import AutograsperBase, RobotActivity
-from library.utils import manual_control
 
 
 class ManualGrasper(AutograsperBase):
@@ -8,7 +7,7 @@ class ManualGrasper(AutograsperBase):
 
     def perform_task(self):
 
-        manual_control(self.robot)
+        self.manual_control()
 
         self.state = RobotActivity.FINISHED  # stop data recording
 
