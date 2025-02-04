@@ -24,7 +24,7 @@ git clone https://github.com/axel-kaliff/cloudgripper-api
 cd cloudgripper-api
 ```
 
-1. **Set up a Virtual Environment & Install Dependencies**
+2. **Set up a Virtual Environment & Install Dependencies**
 This can be done with devcontainers, conda, or venv.
 
 Example using venv:
