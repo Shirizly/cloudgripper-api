@@ -337,93 +337,96 @@ def convert_ndarray_to_list(obj: Any) -> Any:
         return obj
 
 
-def manual_control(robot):
+def manual_control(robot: GripperRobot, step_size=0.1):
     """
     Manually control the robot using keyboard inputs.
     """
     from pynput import keyboard
 
-    current_x = 0.0
-    current_y = 0.0
-    current_z = 0.0
-    current_rotation = 0
-    current_angle = 0.4
+    state, _ = robot.get_state()
+
+    current_x = state["x_norm"]
+    current_y = state["y_norm"]
+    current_z = state["z_norm"]
+    current_rotation = state["rotation"]
+    current_angle = state["claw_norm"]
 
     def on_press(key):
         nonlocal current_x, current_y, current_z, current_rotation, current_angle
         try:
+
+            # == XY axis ==
             if key.char == "w":
-                current_y += 0.1
+                current_y += step_size
                 current_y = min(max(current_y, 0), 1)
                 robot.move_xy(current_x, current_y)
             elif key.char == "a":
-                current_x -= 0.1
+                current_x -= step_size
                 current_x = min(max(current_x, 0), 1)
                 robot.move_xy(current_x, current_y)
             elif key.char == "s":
-                current_y -= 0.1
-                current_y = min(max(current_y, 0), 1)
-                robot.move_xy(current_x, current_y)
-            elif key.char == "x":
-                current_y -= 0.05
-                current_y = min(max(current_y, 0), 1)
-                robot.move_xy(current_x, current_y)
-            elif key.char == "z":
-                current_y -= 0.01
+                current_y -= step_size
                 current_y = min(max(current_y, 0), 1)
                 robot.move_xy(current_x, current_y)
             elif key.char == "d":
-                current_x += 0.1
+                current_x += step_size
                 current_x = min(max(current_x, 0), 1)
                 robot.move_xy(current_x, current_y)
+
+            # == Z axis ==
             elif key.char == "r":
-                current_z += 0.1
+                current_z += step_size
                 current_z = min(max(current_z, 0), 1)
                 print(current_z)
                 robot.move_z(current_z)
             elif key.char == "f":
-                current_z -= 0.1
+                current_z -= step_size
                 current_z = min(max(current_z, 0), 1)
                 print(current_z)
                 robot.move_z(current_z)
+
+            # == Gripper open ==
             elif key.char == "i":
-                current_angle += 0.05
+                current_angle += step_size / 100
                 current_angle = min(current_angle, 1)
                 print(current_angle)
                 robot.move_gripper(current_angle)
+            # == Gripper open small steps==
             elif key.char == "o":
-                current_angle += 0.01
+                current_angle += step_size / 200
                 current_angle = min(current_angle, 1)
                 print(current_angle)
                 robot.move_gripper(current_angle)
-            elif key.char == "p":
-                current_angle -= 0.01
+            # == Gripper close ==
+            elif key.char == "k":
+                current_angle -= step_size / 100
                 current_angle = max(current_angle, 0.2)
                 print(current_angle)
                 robot.move_gripper(current_angle)
+            # == Gripper close small steps==
+            elif key.char == "l":
+                current_angle -= step_size / 200
+                current_angle = max(current_angle, 0.2)
+                print(current_angle)
+                robot.move_gripper(current_angle)
+
+            # == Rotate ==
+            elif key.char == "z":
+                current_rotation -= int(step_size * 100)
+                robot.rotate(current_rotation)
+            elif key.char == "x":
+                current_rotation += int(step_size * 100)
+                robot.rotate(current_rotation)
+
+            # == Quit ==
             elif key.char == "q":
-                current_rotation -= 10
-                robot.rotate(current_rotation)
-            elif key.char == "e":
-                current_rotation += 10
-                robot.rotate(current_rotation)
-            elif key.char == "n":
-                robot.gripper_open()
-                time.sleep(1)
-                robot.move_z(0)
-                time.sleep(1)
-                robot.move_gripper(0.5)
-                time.sleep(1)
-                robot.move_z(1)
-                time.sleep(1)
-                robot.move_xy(min(current_x + 0.2, 1), min(current_y + 0.2, 1))
-                time.sleep(1)
-                robot.move_xy(current_x, current_y)
-                time.sleep(1)
-                robot.move_z(0)
-                time.sleep(1)
+                return False
+
         except Exception as e:
             print(e)
+            print(
+                "Make sure that the runtime has access to an X server. If running in a container on Wayland, you might need to perform `xhost local:root` in the host terminal."
+            )
 
     def on_release(key):
         if key == keyboard.Key.esc:
@@ -462,3 +465,14 @@ def clear_center(robot):
 
     queue_orders(robot, commands, 1)
     print("clearing center complete")
+
+
+def parse_config(config_file):
+    import configparser
+
+    parser = configparser.ConfigParser()
+    parser.read(config_file)
+    if not parser.sections():
+        raise FileNotFoundError(f"Could not read config file at: {config_file}")
+
+    return parser
