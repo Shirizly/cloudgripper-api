@@ -15,13 +15,6 @@ Autograsper is a toolkit and framework for controlling, observing, and setting u
 - [Contributing](#contributing)
 - [License](#license)
 
-## Features
-
-- **Autonomous Data Collection:** Seamlessly control the CloudGripper robot while recording camera feeds and state data.
-- **Modular Design:** Easily extend the framework by implementing your own grasper by subclassing the abstract `AutograsperBase`.
-- **Flexible Recording Options:** Choose between saving data as videos or individual images.
-- **Real-time State Management:** Automatically coordinate robot actions and data recording.
-
 ## Installation
 
 1. **Clone the Repository:**
