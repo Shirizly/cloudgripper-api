@@ -197,28 +197,20 @@ To control the gripper manually you can use the `manual_control` function from t
 
 ```python
 from grasper import AutograsperBase, RobotActivity
-from library.utils import OrderType, manual_control
-import time
-
 
 class ManualGrasper(AutograsperBase):
     def __init__(self, config):
         super().__init__(config)
 
     def perform_task(self):
-        # Method 1: Using queue_orders to send a batch of commands
-        self.queue_orders(
-            [
-                (OrderType.MOVE_XY, [0.5, 0.5]),
-                (OrderType.ROTATE, [30]),
-                (OrderType.MOVE_Z, [0.7]),
-                (OrderType.GRIPPER_OPEN, []),
-            ],
-            time_between_orders=self.time_between_orders  # set in config.ini file
-        )
 
-        # comment or remove if you want multiple experiments to run
+        self.manual_control()
+
         self.state = RobotActivity.FINISHED  # stop data recording
+
+    def reset_task(self):
+        # replace with your own resetting if needed
+        return super().reset_task()
 
 ```
 
