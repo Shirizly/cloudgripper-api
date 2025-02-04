@@ -193,7 +193,7 @@ To perform actions at the start or end of an experiment, you can define the `sta
 Use this example as a starting point for designing more complex tasks and integrating additional sensor data or feedback loops.
 
 ### Example: `Manual Control`
-To control the gripper manually you can use the `manual_control` function from the common utilities found in `library/utils`.
+To control the gripper manually you can use the `manual_control` function.
 
 ```python
 from grasper import AutograsperBase, RobotActivity
