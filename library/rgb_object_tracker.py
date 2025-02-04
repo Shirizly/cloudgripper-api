@@ -207,6 +207,7 @@ def get_large_contours(mask, size_threshold):
     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     return [c for c in contours if cv2.contourArea(c) > size_threshold]
 
+
 def get_contour_center(contours, debug, color, image, debug_image_path):
     """
     Get the center of the largest contour.
@@ -241,20 +242,19 @@ def get_contour_center(contours, debug, color, image, debug_image_path):
 def debug_object_tracker(image, largest_contour, contours, cx, cy, debug_image_path):
     # Create a single-channel mask
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
-    
+
     # Draw the largest contour on the mask
     cv2.drawContours(mask, [largest_contour], -1, 255, thickness=cv2.FILLED)
-    
+
     # Apply the mask to the image
     res = cv2.bitwise_and(image, image, mask=mask)
-    
+
     # Draw debug info
     cv2.circle(res, (cx, cy), 5, (0, 0, 255), -1)
     cv2.drawContours(res, contours, -1, (0, 255, 0), 2)
-    
+
     # Save the debug image
     cv2.imwrite(debug_image_path, res)
-
 
 
 def main():

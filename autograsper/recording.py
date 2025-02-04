@@ -14,8 +14,13 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from client.cloudgripper_client import GripperRobot  # Assuming this is the correct import
-from library.utils import convert_ndarray_to_list, get_undistorted_bottom_image  # Assuming these are the correct imports
+from client.cloudgripper_client import (
+    GripperRobot,
+)  # Assuming this is the correct import
+from library.utils import (
+    convert_ndarray_to_list,
+    get_undistorted_bottom_image,
+)  # Assuming these are the correct imports
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,7 +29,6 @@ class Recorder:
     FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 
     def __init__(self, config: Any, output_dir: str):
-
         try:
             experiment_cfg = config["experiment"]
             self.experiment_name = ast.literal_eval(experiment_cfg["name"])
@@ -37,9 +41,13 @@ class Recorder:
             self.save_data = bool(ast.literal_eval(camera_cfg["record"]))
             self.FPS = int(ast.literal_eval(camera_cfg["fps"]))
 
-            self.record_only_after_action = bool(ast.literal_eval(camera_cfg["record_only_after_action"]))
+            self.record_only_after_action = bool(
+                ast.literal_eval(camera_cfg["record_only_after_action"])
+            )
 
-            self.save_images_individually = bool(ast.literal_eval(camera_cfg["save_images_individually"]))
+            self.save_images_individually = bool(
+                ast.literal_eval(camera_cfg["save_images_individually"])
+            )
 
             self.clip_length = None
             if "clip_length" in camera_cfg:
@@ -75,7 +83,9 @@ class Recorder:
         if self.save_images_individually:
             # Create directories for individual image files
             self.output_images_dir = os.path.join(self.output_dir, "Images")
-            self.output_bottom_images_dir = os.path.join(self.output_dir, "Bottom_Images")
+            self.output_bottom_images_dir = os.path.join(
+                self.output_dir, "Bottom_Images"
+            )
             os.makedirs(self.output_images_dir, exist_ok=True)
             os.makedirs(self.output_bottom_images_dir, exist_ok=True)
         else:
@@ -99,7 +109,10 @@ class Recorder:
                 video_filename_top, self.FOURCC, self.FPS, self.image_top.shape[1::-1]
             )
             video_writer_bottom = cv2.VideoWriter(
-                video_filename_bottom, self.FOURCC, self.FPS, self.bottom_image.shape[1::-1]
+                video_filename_bottom,
+                self.FOURCC,
+                self.FPS,
+                self.bottom_image.shape[1::-1],
             )
 
             return video_writer_top, video_writer_bottom
@@ -120,8 +133,12 @@ class Recorder:
                             self._capture_frame()
 
                         # Only restart video writers for video mode, not when saving images individually.
-                        if (self.clip_length and self.frame_counter % self.clip_length == 0 and 
-                            self.frame_counter != 0 and not self.save_images_individually):
+                        if (
+                            self.clip_length
+                            and self.frame_counter % self.clip_length == 0
+                            and self.frame_counter != 0
+                            and not self.save_images_individually
+                        ):
                             self.video_counter += 1
                             self._start_or_restart_video_writers()
 
@@ -134,7 +151,6 @@ class Recorder:
                             self.take_snapshot -= 1
                     else:
                         time.sleep(1 / self.FPS)
-                    
 
                     image_to_show = copy.copy(self.bottom_image)
                     cv2.imshow(f"ImageBottom_{self.robot_idx}", image_to_show)
@@ -168,7 +184,8 @@ class Recorder:
                     self.output_images_dir, f"image_top_{self.frame_counter}.jpeg"
                 )
                 bottom_filename = os.path.join(
-                    self.output_bottom_images_dir, f"image_bottom_{self.frame_counter}.jpeg"
+                    self.output_bottom_images_dir,
+                    f"image_bottom_{self.frame_counter}.jpeg",
                 )
                 cv2.imwrite(top_filename, self.image_top)
                 cv2.imwrite(bottom_filename, self.bottom_image)
