@@ -310,19 +310,20 @@ def run_calibration(height, robot):
         (OrderType.MOVE_Z, [1.0]),
         (OrderType.MOVE_XY, [0.0, 0.0]),
         (OrderType.MOVE_Z, [height]),
-        (OrderType.MOVE_Z, [1.0]),
+        # (OrderType.MOVE_Z, [1.0]),
         (OrderType.MOVE_XY, [1.0, 0.0]),
-        (OrderType.MOVE_Z, [height]),
-        (OrderType.MOVE_Z, [1.0]),
+        # (OrderType.MOVE_Z, [height]),
+        # (OrderType.MOVE_Z, [1.0]),
         (OrderType.MOVE_XY, [0.0, 1.0]),
-        (OrderType.MOVE_Z, [height]),
-        (OrderType.MOVE_Z, [1.0]),
+        # (OrderType.MOVE_Z, [height]),
+        # (OrderType.MOVE_Z, [1.0]),
         (OrderType.MOVE_XY, [1.0, 1.0]),
-        (OrderType.MOVE_Z, [height]),
+        # (OrderType.MOVE_Z, [height]),
         (OrderType.MOVE_Z, [1.0]),
     ]
 
     queue_orders_with_input(robot, commands)
+    print("calibration finished")
 
 
 def convert_ndarray_to_list(obj: Any) -> Any:
