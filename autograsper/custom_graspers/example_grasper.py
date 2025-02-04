@@ -4,8 +4,8 @@ import time
 
 
 class ExampleGrasper(AutograsperBase):
-    def __init__(self, config, output_dir: str = ""):
-        super().__init__(config, output_dir)
+    def __init__(self, config):
+        super().__init__(config)
 
     def perform_task(self):
         # Method 1: Using queue_orders to send a batch of commands
@@ -16,7 +16,7 @@ class ExampleGrasper(AutograsperBase):
                 (OrderType.MOVE_Z, [0.7]),
                 (OrderType.GRIPPER_OPEN, []),
             ],
-            time_between_orders=self.time_between_orders  # set in config.ini file
+            time_between_orders=self.time_between_orders,  # set in config.ini file
         )
 
         # Method 2: Sending individual commands with state recording
@@ -52,7 +52,7 @@ class ExampleGrasper(AutograsperBase):
                 (OrderType.MOVE_Z, [1]),
                 (OrderType.GRIPPER_CLOSE, []),
             ],
-            time_between_orders=self.time_between_orders  # set in config.ini file
+            time_between_orders=self.time_between_orders,  # set in config.ini file
         )
 
     def reset_task(self):

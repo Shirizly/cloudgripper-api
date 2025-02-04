@@ -46,7 +46,6 @@ class RandomGrasper(AutograsperBase):
         ]
         self.queue_robot_orders(orders, 1)
 
-
     def prepare_experiment(self, position_bank, stack_position):
         if position_bank is None:
             position_bank = [[0.2, 0.2], [0.8, 0.2], [0.8, 0.8]]
@@ -57,9 +56,7 @@ class RandomGrasper(AutograsperBase):
 
         return position_bank, stack_position
 
-
     def perform_task(self):
-
         random_position = self.generate_new_block_position()
 
         self.queue_robot_orders(
@@ -75,10 +72,7 @@ class RandomGrasper(AutograsperBase):
         object_position = get_object_pos(
             self.bottom_image, self.robot_idx, "green", debug=True
         )
-        if (
-            np.linalg.norm(np.array(random_position) - np.array(object_position))
-            < 0.12
-        ):
+        if np.linalg.norm(np.array(random_position) - np.array(object_position)) < 0.12:
             self.failed = False
             print("succesful grasp")
         else:
@@ -105,13 +99,11 @@ class RandomGrasper(AutograsperBase):
         return [x, y]
 
     def recover_after_fail(self):
-
         self.robot.gripper_open()
         time.sleep(0.5)
         self.startup()
 
     def reset_target_block(self):
-
         block_pos = self.generate_new_block_position()
 
         target_color = "green"
@@ -121,7 +113,7 @@ class RandomGrasper(AutograsperBase):
         self.pickup_and_place_object(
             0,
             0,
-            object_position = object_position,
+            object_position=object_position,
             target_position=block_pos,
         )
 
@@ -134,7 +126,6 @@ class RandomGrasper(AutograsperBase):
             self.move_red_to_center()
 
     def reset_task(self):
-
         self._reset_target_block()
         self.startup()
 
@@ -149,11 +140,9 @@ class RandomGrasper(AutograsperBase):
         target_position: List[float] = [0.5, 0.5],
         time_between_orders: float = 2.0,
     ):
-
         if not object_position and not object_color:
             print("Pick and place: object position and color required")
             return
-
 
         if not object_position:
             object_position = get_object_pos(
@@ -199,7 +188,7 @@ class RandomGrasper(AutograsperBase):
             self.pickup_and_place_object(
                 max(block_height - 0.20, 0.02),
                 stack_height,
-                object_position = object_position,
+                object_position=object_position,
                 target_position=target_pos,
             )
 

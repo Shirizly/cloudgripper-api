@@ -10,6 +10,7 @@ from typing import List, Tuple
 
 # TODO update to new functionality (Autograsper base and parameters, parsing config)
 
+
 class StackingAutograsper(AutograsperBase):
     def __init__(
         self,
@@ -35,7 +36,6 @@ class StackingAutograsper(AutograsperBase):
         self.position_bank, self.stack_position = self.prepare_experiment(
             self.position_bank, self.stack_position
         )
-        
 
     def prepare_experiment(self, position_bank, stack_position):
         if position_bank is None:

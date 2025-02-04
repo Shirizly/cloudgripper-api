@@ -14,6 +14,7 @@ from custom_graspers.random_grasping_task import RandomGrasper
 from custom_graspers.example_grasper import ExampleGrasper
 from library.rgb_object_tracker import all_objects_are_visible
 from recording import Recorder
+from library.utils import parse_config
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ ERROR_EVENT = threading.Event()
 # Locks for thread-safe operations
 STATE_LOCK = threading.Lock()
 BOTTOM_IMAGE_LOCK = threading.Lock()
+
 
 @dataclass
 class SharedState:
@@ -43,37 +45,21 @@ class DataCollectionCoordinator:
     and coordinates changes between states.
     """
 
-    def __init__(self, args):
-        self.args = args
-        self.config = self._load_config(args.config)
+    def __init__(self, config_file, grasper: AutograsperBase):
+        self._load_config(config_file)
         self.shared_state = SharedState()
-        self.autograsper = self._initialize_autograsper()
-
-        # Threads
-        self.autograsper_thread: Optional[threading.Thread] = (None,)
-        self.monitor_thread: Optional[threading.Thread] = None
-
-    # --------------------
-    # Customize Autograsper
-    # --------------------
-
-    def _initialize_autograsper(self) -> AutograsperBase:
-        """Instantiates the Autograsper with config-based parameters."""
-
-        autograsper = ExampleGrasper(
-            self.config,
-        )
-        return autograsper
-
-    # --------------------
-    # Public Methods
-    # --------------------
+        self.autograsper = grasper
 
     def run(self):
         """
         Main controller entry point: starts threads,
         monitors states, and wraps everything in try/finally.
         """
+
+        # Threads
+        self.autograsper_thread: Optional[threading.Thread] = (None,)
+        self.monitor_thread: Optional[threading.Thread] = None
+
         try:
             self._start_threads()
             self._handle_state_changes()
@@ -87,27 +73,21 @@ class DataCollectionCoordinator:
     # --------------------
 
     def _load_config(self, config_file: str):
-        """Load and verify the configuration from a file."""
-        import configparser
-
-        parser = configparser.ConfigParser()
-        parser.read(config_file)
-        if not parser.sections():
-            raise FileNotFoundError(f"Could not read config file at: {config_file}")
+        self.config = parse_config(config_file)
 
         try:
-            experiment_cfg = parser["experiment"]
-            camera_cfg = parser["camera"]
+            experiment_cfg = self.config["experiment"]
+            camera_cfg = self.config["camera"]
 
             self.experiment_name = ast.literal_eval(experiment_cfg["name"])
-            self.timeout_between_experiments = ast.literal_eval(experiment_cfg["timeout_between_experiments"])
+            self.timeout_between_experiments = ast.literal_eval(
+                experiment_cfg["timeout_between_experiments"]
+            )
 
             self.save_data = bool(ast.literal_eval(camera_cfg["record"]))
 
         except Exception as e:
             raise ValueError("ERROR reading from config.ini: ", e)
-
-        return parser
 
     def _start_threads(self):
         """Starts the main autograsper thread and state monitor thread."""
@@ -121,7 +101,6 @@ class DataCollectionCoordinator:
         try:
             while not ERROR_EVENT.is_set():
                 with STATE_LOCK:
-
                     self._check_if_record_is_requested()
 
                     if self.shared_state.state != self.autograsper.state:
@@ -132,15 +111,17 @@ class DataCollectionCoordinator:
                 time.sleep(0.1)
         except Exception as e:
             self._handle_error(e)
-    
+
     def _check_if_record_is_requested(self):
-        if self.autograsper.request_state_record and self.shared_state.recorder is not None:
+        if (
+            self.autograsper.request_state_record
+            and self.shared_state.recorder is not None
+        ):
             if self.shared_state.recorder:
                 self.shared_state.recorder.take_snapshot += 1
             while self.shared_state.recorder.take_snapshot > 0:
                 time.sleep(0.1)
             self.autograsper.request_state_record = False
-
 
     def _monitor_bottom_image(self):
         """Copies the latest bottom image from the recorder to the autograsper."""

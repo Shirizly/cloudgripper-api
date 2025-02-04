@@ -83,8 +83,8 @@ from library.utils import OrderType
 import time
 
 class MyCustomGrasper(AutograsperBase):
-    def __init__(self, config, output_dir: str = ""):
-        super().__init__(config, output_dir)
+    def __init__(self, config):
+        super().__init__(config)
 
     def perform_task(self):
         # Use queue_orders() to execute a sequence of actions
@@ -100,14 +100,14 @@ class MyCustomGrasper(AutograsperBase):
 ```
 
 3. **Integrate Your Custom Grasper:**
-In `coordinator.py`, modify the `_initialize_autograsper()` method to instantiate your custom grasper instead of the default. For example:
+In `main.py`, import your grasper and replace the example class to instantiate your custom grasper instead. For example:
 
 ```python
 # Replace the default import with your custom grasper
 from custom_graspers.my_custom_grasper import MyCustomGrasper
 
-def _initialize_autograsper(self) -> AutograsperBase:
-    return MyCustomGrasper(self.config)
+config_file = "autograsper/config.ini"
+grasper = MyCustomGrasper(config_file)
 ```
 
 ### Example: `ExampleGrasper`
@@ -127,8 +127,8 @@ import time
 
 
 class ExampleGrasper(AutograsperBase):
-    def __init__(self, config, output_dir: str = ""):
-        super().__init__(config, output_dir)
+    def __init__(self, config):
+        super().__init__(config)
 
     def perform_task(self):
         # Method 1: Using queue_orders to send a batch of commands
@@ -192,6 +192,36 @@ To perform actions at the start or end of an experiment, you can define the `sta
 
 Use this example as a starting point for designing more complex tasks and integrating additional sensor data or feedback loops.
 
+### Example: `Manual Control`
+To control the gripper manually you can use the `manual_control` function from the common utilities found in `library/utils`.
+
+```python
+from grasper import AutograsperBase, RobotActivity
+from library.utils import OrderType, manual_control
+import time
+
+
+class ManualGrasper(AutograsperBase):
+    def __init__(self, config):
+        super().__init__(config)
+
+    def perform_task(self):
+        # Method 1: Using queue_orders to send a batch of commands
+        self.queue_orders(
+            [
+                (OrderType.MOVE_XY, [0.5, 0.5]),
+                (OrderType.ROTATE, [30]),
+                (OrderType.MOVE_Z, [0.7]),
+                (OrderType.GRIPPER_OPEN, []),
+            ],
+            time_between_orders=self.time_between_orders  # set in config.ini file
+        )
+
+        # comment or remove if you want multiple experiments to run
+        self.state = RobotActivity.FINISHED  # stop data recording
+
+```
+
 ### Advanced Examples
 More advanced examples can be found in the `custom_graspers` directory. This includes evaluating task success, integrating resetting functions etc. Basic examples of resetting and task evaluation will be posted on this README soon.
 
@@ -205,6 +235,10 @@ More advanced examples can be found in the `custom_graspers` directory. This inc
 
 **Q: Video files are missing or incomplete.**  
 **A:** Ensure that the output directories have proper write permissions and that the camera calibration parameters in your configuration are correct.
+
+**Q: Recorded images capture the robot mid-action, not after the action is complete.**  
+**A:** When recording is set to only record frames after actions, images are requested after an action is performed *and* the action time delay. If performing manual capture requests (method 2 above), add some time after the action and the request. If using `queue_orders` (method 1), either set a higher time delay value in the function call or change the default in your `config.ini` file.
+
 
 _For more detailed troubleshooting, please refer to the [Issues](https://github.com/axel-kaliff/cloudgripper-api/issues) section on GitHub._
 

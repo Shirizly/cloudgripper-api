@@ -16,7 +16,12 @@ if project_root not in sys.path:
 
 # Import project-specific modules
 from client.cloudgripper_client import GripperRobot
-from library.utils import OrderType, get_undistorted_bottom_image, execute_order
+from library.utils import (
+    OrderType,
+    get_undistorted_bottom_image,
+    execute_order,
+    parse_config,
+)
 
 # Load environment variables
 load_dotenv()
@@ -32,7 +37,7 @@ class RobotActivity(Enum):
 class AutograsperBase(ABC):
     def __init__(
         self,
-        config,
+        config_file,
         output_dir: str = "",
     ):
         self.token = os.getenv("CLOUDGRIPPER_TOKEN")
@@ -45,22 +50,27 @@ class AutograsperBase(ABC):
 
         self.state = RobotActivity.STARTUP
         self.start_flag = False
-        
-        self.request_state_record = False
 
+        self.request_state_record = False
 
         # fudge time to ensure frames at the start/finish of task/resetting
         self.task_time_margin = 2
+
+        config = parse_config(config_file)
 
         try:
             camera_cfg = config["camera"]
             self.camera_matrix = np.array(ast.literal_eval(camera_cfg["m"]))
             self.distortion_coeffs = np.array(ast.literal_eval(camera_cfg["d"]))
-            self.record_only_after_action = bool(ast.literal_eval(camera_cfg["record_only_after_action"]))
+            self.record_only_after_action = bool(
+                ast.literal_eval(camera_cfg["record_only_after_action"])
+            )
 
             experiment_cfg = config["experiment"]
             self.robot_idx = ast.literal_eval(experiment_cfg["robot_idx"])
-            self.time_between_orders = ast.literal_eval(experiment_cfg["time_between_orders"])
+            self.time_between_orders = ast.literal_eval(
+                experiment_cfg["time_between_orders"]
+            )
 
         except Exception as e:
             raise ValueError("Grasper config.ini ERROR: ", e) from e
@@ -77,17 +87,15 @@ class AutograsperBase(ABC):
             return GripperRobot(robot_idx, token)
         except Exception as e:
             raise ValueError("Invalid robot ID or token: ", e) from e
-    
+
     def record_current_state(self):
         self.request_state_record = True
         while self.request_state_record:
             time.sleep(0.05)
 
     def wait_for_start_signal(self):
-        # TODO this solution can probably be improved
         while not self.start_flag:
             time.sleep(0.05)
-
 
     def run_grasping(self):
         while self.state != RobotActivity.FINISHED:
@@ -107,7 +115,7 @@ class AutograsperBase(ABC):
             if self.state == RobotActivity.FINISHED:
                 break
 
-            time.sleep(self.task_time_margin) 
+            time.sleep(self.task_time_margin)
             self.state = RobotActivity.RESETTING
             time.sleep(self.task_time_margin)
 
@@ -126,7 +134,9 @@ class AutograsperBase(ABC):
     @abstractmethod
     def perform_task(self):
         while True:
-            print("GRASPER: No task defined. Override `perform_task` function to perform robot actions.")
+            print(
+                "GRASPER: No task defined. Override `perform_task` function to perform robot actions."
+            )
             time.sleep(30)
 
     def reset_task(self):
@@ -134,7 +144,6 @@ class AutograsperBase(ABC):
 
     def startup(self):
         pass
-
 
     def queue_orders(
         self,
@@ -155,6 +164,8 @@ class AutograsperBase(ABC):
         for order in order_list:
             execute_order(self.robot, order, output_dir, reverse_xy)
             time.sleep(time_between_orders)
-            if self.record_only_after_action and (self.state is RobotActivity.ACTIVE or self.state is RobotActivity.RESETTING):
+            if self.record_only_after_action and (
+                self.state is RobotActivity.ACTIVE
+                or self.state is RobotActivity.RESETTING
+            ):
                 self.record_current_state()
-
