@@ -97,6 +97,9 @@ class Recorder:
 
     def _start_new_video(self) -> Tuple[cv2.VideoWriter, cv2.VideoWriter]:
         """Start new video writers for top and bottom cameras."""
+        if not self.ensure_images():
+            return
+
         video_filename_top = os.path.join(
             self.output_video_dir, f"video_{self.video_counter}.mp4"
         )
@@ -127,6 +130,9 @@ class Recorder:
             while not self.stop_flag:
                 if not self.pause:
                     self._update()
+
+                    if not self.ensure_images():
+                        return
 
                     if self.record_only_after_action is False or self.take_snapshot > 0:
                         if self.save_data:
@@ -178,6 +184,8 @@ class Recorder:
         or save each frame as an individual JPEG image.
         """
         try:
+            if not self.ensure_images():
+                return
             if self.save_images_individually:
                 # Save each image as a separate JPEG file
                 top_filename = os.path.join(
@@ -252,3 +260,21 @@ class Recorder:
                 json.dump(data, file, indent=4)
         except Exception as e:
             logging.error("Error saving state: %s", e)
+
+    def ensure_images(self) -> bool:
+        """
+        Ensure that both top and bottom images are valid.
+
+        Checks if self.image_top or self.bottom_image are None.
+        If either is None, calls self._update() to refresh the images.
+        If after update either image is still None, logs an error and returns False.
+        Otherwise, returns True.
+        """
+        if self.image_top is None or self.bottom_image is None:
+            self._update()
+
+        if self.image_top is None or self.bottom_image is None:
+            logging.error("ensure_images: Failed to obtain valid images from the robot after update.")
+            return False
+
+        return True
