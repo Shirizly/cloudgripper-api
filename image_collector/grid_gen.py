@@ -144,8 +144,8 @@ if __name__ == "__main__":
     # Example usage:
     bounds_2d = [(0, 1), (0, 1)]  # 2D space
     bounds_3d = [(0, 1), (0, 1), (0, 1)]  # 3D space
-    base_resolution = 16
-    N = 4  # Number of sub-grids
+    base_resolution = 30
+    N = 30  # Number of sub-grids
 
     visualize_subgrids(bounds_2d, base_resolution, N)  # 2D Visualization
     visualize_subgrids(bounds_3d, base_resolution, N)  # 3D Visualization

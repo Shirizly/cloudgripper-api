@@ -276,7 +276,7 @@ class GripperRobot:
         """
         response = self._make_request("getAllStates")
         if response is None:
-            return None, None, None, None, None, None
+            return None, None, None, None
 
         image_top_data = self._safe_get(response, "data_top_camera")
         time_top = self._safe_get(response, "time_top_camera")
