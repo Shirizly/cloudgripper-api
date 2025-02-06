@@ -28,3 +28,16 @@ def display_images(images, window_name="Robot Images"):
             break
 
     cv2.destroyAllWindows()
+
+def update_images(images, window_name="Robot Images"):
+    # Get dimensions of the first image
+    height, width = images[0].shape[:2]
+
+    # Resize all images to the same dimensions
+    resized_images = [cv2.resize(image, (image.shape[1], height)) for image in images]
+
+    # Concatenate images horizontally
+    concatenated_image = np.concatenate(resized_images, axis=1)
+
+    # Display the image
+    cv2.imshow(window_name, concatenated_image)
