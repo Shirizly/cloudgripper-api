@@ -36,7 +36,7 @@ def update_camera():
         with lock:
             # Get images from both cameras
             image_top, image_base, state, time_state = robot.get_all_states()  # Get new images and robot configuration - if doesn't work, switch to separate calls
-            time.sleep(0.5)
+            time.sleep(0.1)
             # image_top, _ = robot.get_image_top()
             # time.sleep(0.5)
             # image_base, _ = robot.get_image_base()
@@ -63,25 +63,25 @@ def update_camera():
 # Function to handle keyboard input
 def on_press(key):
     global running, current_config
-    step_size = 0.05  # Step size for robot movement
+    step_size = 0.025  # Step size for robot movement
     try:
         if key.char == "a":  # Move left (X-)
             current_config[0] -= step_size
             robot.move_xy(current_config[0], current_config[1])
         elif key.char == "d":  # Move right (X+)
-            current_config[0] +=step_size
+            current_config[0] += step_size
             robot.move_xy(current_config[0], current_config[1])
         elif key.char == "w":  # Move forward (Y+)
-            current_config[1] +=step_size
+            current_config[1] += step_size
             robot.move_xy(current_config[0], current_config[1])
         elif key.char == "s":  # Move backward (Y-)
-            current_config[1] -=step_size
+            current_config[1] -= step_size
             robot.move_xy(current_config[0], current_config[1])
         elif key.char == "z":  # Move down (Z-)
-            current_config[2] -=step_size
+            current_config[2] -= step_size
             robot.move_z(current_config[2])
         elif key.char == "c":  # Move up (Z+)
-            current_config[2] +=step_size
+            current_config[2] += step_size
             robot.move_z(current_config[2])
         elif key.char == "q":  # Rotate counterclockwise
             current_config[3] -= 10
@@ -99,7 +99,7 @@ def on_press(key):
             return False  # Stop listener
         
         # print(f"Current configuration: {current_config}")
-        time.sleep(0.2)  # Delay to prevent rapid key presses
+        time.sleep(0.1)  # Delay to prevent rapid key presses
     except AttributeError:
         pass  # Handle non-character keys safely
 
