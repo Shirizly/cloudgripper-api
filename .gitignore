@@ -31,3 +31,9 @@ data backups/test
 data backups/test
 data backups/successful2 copy
 data backups
+FullGrad
+assets
+data4robotics
+data4robotics.egg-info
+dataset/CloudGripper_stack_1k/limited_init_positions/hydra_logs/bc_finetune
+logs
