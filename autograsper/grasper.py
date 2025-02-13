@@ -157,6 +157,7 @@ class AutograsperBase(ABC):
         time_between_orders: float,
         output_dir: str = "",
         reverse_xy: bool = False,
+        record = True
     ):
         """
         Queue a list of orders for the robot to execute sequentially and save state after each order.
@@ -170,7 +171,7 @@ class AutograsperBase(ABC):
         for order in order_list:
             execute_order(self.robot, order, output_dir, reverse_xy)
             time.sleep(time_between_orders)
-            if self.record_only_after_action and (
+            if record and self.record_only_after_action and (
                 self.state is RobotActivity.ACTIVE
                 or self.state is RobotActivity.RESETTING
             ):
