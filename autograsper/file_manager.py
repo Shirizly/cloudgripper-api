@@ -1,5 +1,6 @@
 import os
 
+
 class FileManager:
     @staticmethod
     def create_dir(path: str):

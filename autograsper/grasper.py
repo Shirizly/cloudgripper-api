@@ -9,7 +9,7 @@ import numpy as np
 import threading
 from dotenv import load_dotenv
 
-# Ensure project root is in the system path
+# Ensure project root is in the system path.
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
@@ -51,9 +51,7 @@ class AutograsperBase(ABC):
         self.failed = False
 
         self.state = RobotActivity.STARTUP
-        # Event to wait for the start signal.
         self.start_event = threading.Event()
-        # Event to signal that a state record has been processed.
         self.state_recorded_event = threading.Event()
 
         self.request_state_record = False
@@ -85,26 +83,24 @@ class AutograsperBase(ABC):
             raise ValueError("Invalid robot ID or token: ", e) from e
 
     def record_current_state(self):
-        """Request a state record and wait until it is processed or shutdown is signaled."""
+        """Request a state record and wait until processed or shutdown."""
         self.request_state_record = True
         self.state_recorded_event.clear()
         while not self.shutdown_event.is_set():
             if self.state_recorded_event.wait(timeout=0.1):
                 return
-        return
 
     def wait_for_start_signal(self):
         """Wait for the start event, checking periodically for shutdown."""
         while not self.shutdown_event.is_set():
             if self.start_event.wait(timeout=0.1):
                 return
-        return
 
     def run_grasping(self):
         """
-        State machine loop:
+        A simple state-machine loop:
           - STARTUP: Run startup logic, then move to ACTIVE.
-          - ACTIVE: Wait for start signal, then perform task.
+          - ACTIVE: Wait for start signal, perform task.
           - RESETTING: After task, sleep and either recover (if failed) or reset.
         """
         while self.state != RobotActivity.FINISHED and not self.shutdown_event.is_set():
@@ -113,7 +109,7 @@ class AutograsperBase(ABC):
                 self.state = RobotActivity.ACTIVE
             elif self.state == RobotActivity.ACTIVE:
                 self.wait_for_start_signal()
-                self.start_event.clear()  # Clear for next cycle
+                self.start_event.clear()  # Clear for next cycle.
                 try:
                     self.perform_task()
                 except Exception as e:
@@ -143,7 +139,7 @@ class AutograsperBase(ABC):
     @abstractmethod
     def perform_task(self):
         """
-        Override this method to perform robot actions.
+        Override to perform robot actions.
         Default implementation prints a message periodically.
         """
         while not self.shutdown_event.is_set():
@@ -181,6 +177,7 @@ class AutograsperBase(ABC):
                 and (self.state in (RobotActivity.ACTIVE, RobotActivity.RESETTING))
             ):
                 self.record_current_state()
+
 
 
     # CG1Specific

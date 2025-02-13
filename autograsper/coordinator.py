@@ -2,12 +2,10 @@
 import os
 import logging
 import time
-import cv2
-from dataclasses import dataclass
-from typing import Optional
-from queue import Queue, Empty
 import concurrent.futures
 import threading
+from dataclasses import dataclass
+from queue import Queue, Empty
 
 from grasper import RobotActivity, AutograsperBase
 from recording import Recorder
@@ -23,7 +21,7 @@ class SharedState:
     """
 
     state: str = RobotActivity.STARTUP
-    recorder: Optional[Recorder] = None
+    recorder: Recorder = None
 
 
 class DataCollectionCoordinator:
@@ -39,9 +37,12 @@ class DataCollectionCoordinator:
         self.shutdown_event = shutdown_event
         self.shared_state = SharedState()
         self.autograsper = grasper
-        self.message_queue = Queue()
+        # Message queue for non-UI messages.
+        self.msg_queue = Queue()
+        # Separate UI queue so that image updates can be handled in the main thread.
+        self.ui_queue = Queue()
 
-        # Read configuration with explicit error handling
+        # Read configuration with explicit error handling.
         try:
             experiment_config = config["experiment"]
             camera_config = config["camera"]
@@ -62,16 +63,16 @@ class DataCollectionCoordinator:
         while not self.shutdown_event.is_set():
             # Post state update message.
             state_msg = {"type": "state_update", "state": self.autograsper.state}
-            self.message_queue.put(state_msg)
+            self.msg_queue.put(state_msg)
 
             self._check_if_record_is_requested()
 
-            # Post image update message if recorder is available.
+            # If a recorder exists, push an image update message onto the UI queue.
             if self.shared_state.recorder is not None:
                 bottom_img = self.shared_state.recorder.bottom_image
                 if bottom_img is not None:
-                    img_msg = {"type": "image_update", "image": bottom_img.copy()}
-                    self.message_queue.put(img_msg)
+                    ui_msg = {"type": "image_update", "image": bottom_img.copy()}
+                    self.ui_queue.put(ui_msg)
             self.shutdown_event.wait(timeout=0.1)
 
     def _check_if_record_is_requested(self):
@@ -88,13 +89,13 @@ class DataCollectionCoordinator:
 
     def _process_messages(self):
         """
-        Processes messages from the message queue.
+        Processes non-UI messages from the message queue.
         """
         prev_state = RobotActivity.STARTUP
         self.session_dir, self.task_dir, self.restore_dir = "", "", ""
         while not self.shutdown_event.is_set():
             try:
-                msg = self.message_queue.get(timeout=0.2)
+                msg = self.msg_queue.get(timeout=0.2)
             except Empty:
                 continue
 
@@ -112,16 +113,7 @@ class DataCollectionCoordinator:
                         self._on_finished_state()
                         break
                     prev_state = current_state
-            elif msg["type"] == "image_update":
-                bottom_img = msg["image"]
-                try:
-                    cv2.imshow("Bottom Image", bottom_img)
-                    if cv2.waitKey(1) & 0xFF == ord("q"):
-                        self.shutdown_event.set()
-                except Exception as e:
-                    logger.error("Error during image display: %s", e)
-
-            self.message_queue.task_done()
+            self.msg_queue.task_done()
 
     def _on_state_transition(self, old_state, new_state):
         if new_state == RobotActivity.STARTUP and old_state != RobotActivity.STARTUP:
@@ -136,7 +128,6 @@ class DataCollectionCoordinator:
             "recorded_data",
             self.experiment_name,
         )
-        # Use FileManager to create session directories.
         self.session_dir, self.task_dir, self.restore_dir = (
             FileManager.get_session_dirs(base_dir)
         )
@@ -153,9 +144,7 @@ class DataCollectionCoordinator:
         if not self.shared_state.recorder:
             self.shared_state.recorder = self._setup_recorder(output_dir)
             # Start the recorder in its own thread.
-            self.recorder_future = self.executor.submit(
-                self.shared_state.recorder.record
-            )
+            self.executor.submit(self.shared_state.recorder.record)
         if self.save_data:
             self.shared_state.recorder.start_new_recording(output_dir)
 
@@ -178,36 +167,43 @@ class DataCollectionCoordinator:
     def _on_finished_state(self):
         if self.shared_state.recorder:
             self.shared_state.recorder.stop()
-            # Wait briefly for the recorder thread to finish.
-            time.sleep(1)
+            time.sleep(1)  # Allow recorder to finish up
 
-    def run(self):
+    # --- Public API for running coordinator tasks ---
+    def start(self):
         """
-        Main entry point: Uses a ThreadPoolExecutor to run the autograsper, state monitor,
-        and message processor concurrently.
+        Starts the coordinator's background tasks.
         """
-        with concurrent.futures.ThreadPoolExecutor(
+        self.executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="Coord"
-        ) as executor:
-            self.executor = executor  # Save reference for later submissions.
-            futures = [
-                executor.submit(self.autograsper.run_grasping),
-                executor.submit(self._monitor_state),
-                executor.submit(self._process_messages),
-            ]
-            try:
-                concurrent.futures.wait(
-                    futures, return_when=concurrent.futures.FIRST_EXCEPTION
-                )
-            except Exception as e:
-                logger.error("Exception in one of the coordinator tasks: %s", e)
-                self.shutdown_event.set()
-            finally:
-                self.shutdown_event.set()
-                for future in futures:
-                    try:
-                        future.result(timeout=5)
-                    except Exception as e:
-                        logger.error("Error waiting for task to finish: %s", e)
-                cv2.destroyAllWindows()
-                logger.info("Coordinator shutdown complete.")
+        )
+        self.futures = [
+            self.executor.submit(self.autograsper.run_grasping),
+            self.executor.submit(self._monitor_state),
+            self.executor.submit(self._process_messages),
+        ]
+
+    def join(self):
+        """
+        Blocks until the coordinator's background tasks have finished.
+        """
+        try:
+            concurrent.futures.wait(
+                self.futures, return_when=concurrent.futures.FIRST_EXCEPTION
+            )
+        except Exception as e:
+            logger.error("Exception in coordinator tasks: %s", e)
+            self.shutdown_event.set()
+        finally:
+            self.shutdown_event.set()
+            self.executor.shutdown(wait=True)
+
+    def get_ui_update(self, timeout: float = 0.1):
+        """
+        Retrieves an image update from the UI queue.
+        Returns the message dict if available, or None.
+        """
+        try:
+            return self.ui_queue.get(timeout=timeout)
+        except Empty:
+            return None

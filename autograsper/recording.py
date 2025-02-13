@@ -95,22 +95,19 @@ class Recorder:
             self.output_bottom_video_dir, f"video_{self.video_counter}.mp4"
         )
 
-        if self.save_data:
-            with self.image_lock:
-                top_shape = self.image_top.shape[1::-1]
-                bottom_shape = self.bottom_image.shape[1::-1]
-            video_writer_top = cv2.VideoWriter(
-                video_filename_top, self.FOURCC, self.FPS, top_shape
-            )
-            video_writer_bottom = cv2.VideoWriter(
-                video_filename_bottom, self.FOURCC, self.FPS, bottom_shape
-            )
-            return video_writer_top, video_writer_bottom
-        else:
-            return None, None
+        with self.image_lock:
+            top_shape = self.image_top.shape[1::-1]
+            bottom_shape = self.bottom_image.shape[1::-1]
+        video_writer_top = cv2.VideoWriter(
+            video_filename_top, self.FOURCC, self.FPS, top_shape
+        )
+        video_writer_bottom = cv2.VideoWriter(
+            video_filename_bottom, self.FOURCC, self.FPS, bottom_shape
+        )
+        return video_writer_top, video_writer_bottom
 
     def record(self) -> None:
-        """Record video or images. Image display is handled by the coordinator."""
+        """Record video or images. Image display is handled by the coordinator UI."""
         self._prepare_new_recording()
         try:
             while not self.stop_flag and not self.shutdown_event.is_set():
