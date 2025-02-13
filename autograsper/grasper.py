@@ -51,15 +51,18 @@ class AutograsperBase(ABC):
         self.state = RobotActivity.STARTUP
         self.start_flag = False
 
+        #TODO make this private
         self.request_state_record = False
 
         # fudge time to ensure frames at the start/finish of task/resetting
+        #TODO  make this part of default congif file like camera variables
         self.task_time_margin = 2
         self.robot_state = None
 
         config = parse_config(config_file)
 
         try:
+            #CG1Specific
             camera_cfg = config["camera"]
             self.camera_matrix = np.array(ast.literal_eval(camera_cfg["m"]))
             self.distortion_coeffs = np.array(ast.literal_eval(camera_cfg["d"]))
@@ -81,9 +84,11 @@ class AutograsperBase(ABC):
         self.bottom_image = get_undistorted_bottom_image(
             self.robot, self.camera_matrix, self.distortion_coeffs
         )
+        
 
-    @staticmethod
-    def initialize_robot(robot_idx: int, token: str) -> GripperRobot:
+    #TODO explain this in the README, transition to being able to hotswap backends
+    #CG1Specific
+    def initialize_robot(self, robot_idx: int, token: str) -> GripperRobot:
         try:
             return GripperRobot(robot_idx, token)
         except Exception as e:
@@ -171,6 +176,7 @@ class AutograsperBase(ABC):
             ):
                 self.record_current_state()
 
+    #CG1Specific
     def manual_control(self, step_size=0.1, state = None, time_between_orders=None):
         """
         Manually control the robot using keyboard inputs.
