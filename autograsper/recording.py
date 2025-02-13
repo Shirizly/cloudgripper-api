@@ -14,6 +14,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
+#CG1Specific
 from client.cloudgripper_client import (
     GripperRobot,
 )  # Assuming this is the correct import
@@ -65,9 +66,12 @@ class Recorder:
         self.bottom_image = None
         self.pause = False
 
+        self.state = None
+
         # For when record_only_after_action is True
         self.take_snapshot = 0
 
+        
         self._update()
 
         # Initialize state variables

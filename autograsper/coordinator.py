@@ -103,6 +103,8 @@ class DataCollectionCoordinator:
                 with STATE_LOCK:
                     self._check_if_record_is_requested()
 
+                    self.autograsper.robot_state = self.shared_state.recorder.state
+
                     if self.shared_state.state != self.autograsper.state:
                         self.shared_state.state = self.autograsper.state
                         logger.info(f"State changed to: {self.shared_state.state}")
@@ -169,7 +171,6 @@ class DataCollectionCoordinator:
     def _on_state_transition(self, old_state, new_state):
         """Optional hook for additional logic during state transitions."""
         if new_state == RobotActivity.STARTUP and old_state != RobotActivity.STARTUP:
-            # Possibly pause the recorder if it exists
             if self.shared_state.recorder:
                 self.shared_state.recorder.pause = True
                 time.sleep(self.timeout_between_experiments)
