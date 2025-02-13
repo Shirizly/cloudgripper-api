@@ -10,7 +10,7 @@ class ExampleGrasper(AutograsperBase):
     def perform_task(self):
         self.queue_orders(
             [
-                (OrderType.MOVE_XY, [0.5, 0.5]),
+                (OrderType.MOVE_XY, [0.9, 0.9]),
                 (OrderType.ROTATE, [30]),
                 (OrderType.MOVE_Z, [0.7]),
                 (OrderType.GRIPPER_OPEN, []),
