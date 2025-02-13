@@ -37,3 +37,13 @@ data4robotics
 data4robotics.egg-info
 dataset/CloudGripper_stack_1k/limited_init_positions/hydra_logs/bc_finetune
 logs
+eval_bash
+experiments
+sbatch
+tools
+continual_learning.py
+eval_requirements.txt
+scratch.py
+setup.py
+visualize.py
+visualize_video.py
