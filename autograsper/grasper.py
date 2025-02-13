@@ -15,7 +15,8 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from client.cloudgripper_client import GripperRobot
-from library.utils import get_undistorted_bottom_image, execute_order, OrderType
+import library.utils as utils
+from library.utils import OrderType
 
 load_dotenv()
 
@@ -37,7 +38,9 @@ def sleep_with_shutdown(duration: float, shutdown_event: threading.Event):
 
 
 class AutograsperBase(ABC):
-    def __init__(self, config, output_dir: str = "", shutdown_event: threading.Event = None):
+    def __init__(
+        self, config, output_dir: str = "", shutdown_event: threading.Event = None
+    ):
         if shutdown_event is None:
             raise ValueError("shutdown_event must be provided")
         self.shutdown_event = shutdown_event
@@ -61,24 +64,25 @@ class AutograsperBase(ABC):
         try:
             camera_config = config["camera"]
             experiment_config = config["experiment"]
-            self.camera_matrix = np.array(camera_config["m"])
-            self.distortion_coeffs = np.array(camera_config["d"])
-            self.record_only_after_action = bool(camera_config["record_only_after_action"])
+            self.record_only_after_action = bool(
+                camera_config["record_only_after_action"]
+            )
             self.robot_idx = experiment_config["robot_idx"]
             self.time_between_orders = experiment_config["time_between_orders"]
         except KeyError as e:
-            raise ValueError(f"Missing configuration key in AutograsperBase: {e}") from e
+            raise ValueError(
+                f"Missing configuration key in AutograsperBase: {e}"
+            ) from e
         except TypeError as e:
-            raise ValueError(f"Invalid configuration format in AutograsperBase: {e}") from e
+            raise ValueError(
+                f"Invalid configuration format in AutograsperBase: {e}"
+            ) from e
 
-        self.robot = self.initialize_robot(self.robot_idx, self.token)
-        self.bottom_image = get_undistorted_bottom_image(
-            self.robot, self.camera_matrix, self.distortion_coeffs
-        )
+        self.robot = self.initialize_robot()
 
-    def initialize_robot(self, robot_idx: int, token: str) -> GripperRobot:
+    def initialize_robot(self) -> GripperRobot:
         try:
-            return GripperRobot(robot_idx, token)
+            return GripperRobot(self.robot_idx, self.token)
         except Exception as e:
             raise ValueError("Invalid robot ID or token: ", e) from e
 
@@ -143,7 +147,9 @@ class AutograsperBase(ABC):
         Default implementation prints a message periodically.
         """
         while not self.shutdown_event.is_set():
-            print("GRASPER: No task defined. Override perform_task() to perform robot actions.")
+            print(
+                "GRASPER: No task defined. Override perform_task() to perform robot actions."
+            )
             sleep_with_shutdown(0.5, self.shutdown_event)
         print("GRASPER: Exiting perform_task() due to shutdown signal.")
 
@@ -154,6 +160,13 @@ class AutograsperBase(ABC):
     def startup(self):
         """Override to implement initialization logic before a task."""
         pass
+
+    def get_state(self):
+        "Update state for robot"
+        self.robot.get_state()
+
+    def execute_order(self, order, output_dir, reverse_xy):
+        utils.execute_order(self.robot, order, output_dir, reverse_xy)
 
     def queue_orders(
         self,
@@ -169,7 +182,7 @@ class AutograsperBase(ABC):
         for order in order_list:
             if self.shutdown_event.is_set():
                 break
-            execute_order(self.robot, order, output_dir, reverse_xy)
+            self.execute_order(order, output_dir, reverse_xy)
             sleep_with_shutdown(time_between_orders, self.shutdown_event)
             if (
                 record
@@ -177,8 +190,6 @@ class AutograsperBase(ABC):
                 and (self.state in (RobotActivity.ACTIVE, RobotActivity.RESETTING))
             ):
                 self.record_current_state()
-
-
 
     # CG1Specific
     def manual_control(self, step_size=0.1, state=None, time_between_orders=None):
@@ -188,7 +199,7 @@ class AutograsperBase(ABC):
         from pynput import keyboard
 
         if self.robot_state is None:
-            self.robot_state, _ = self.robot.get_state()
+            self.robot_state, _ = self.get_state()
         if time_between_orders is None:
             time_between_orders = self.time_between_orders
 
