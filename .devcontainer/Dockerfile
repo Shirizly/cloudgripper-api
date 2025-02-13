@@ -1,4 +1,4 @@
-FROM condaforge/miniforge3:24.3.0-0
+FROM continuumio/miniconda3
 
 # RUN sudo apt-get update && sudo apt-get install -y \
 #     libx11-xcb1 \

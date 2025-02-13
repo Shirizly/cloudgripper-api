@@ -1,7 +1,6 @@
 {
 	// For quick reference: https://containers.dev/implementors/json_reference/
-	"name": "Miniforge3",
-	"image": "condaforge/miniforge3:24.3.0-0",
+	"name": "CloudGripper API",
 	"build": {
 		"context": "..",
 		"dockerfile": "Dockerfile"
