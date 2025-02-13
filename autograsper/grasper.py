@@ -15,7 +15,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from client.cloudgripper_client import GripperRobot
-from library.utils import get_undistorted_bottom_image, OrderType, execute_order
+from library.utils import get_undistorted_bottom_image, execute_order, OrderType
 
 load_dotenv()
 
@@ -37,9 +37,7 @@ def sleep_with_shutdown(duration: float, shutdown_event: threading.Event):
 
 
 class AutograsperBase(ABC):
-    def __init__(
-        self, config, output_dir: str = "", shutdown_event: threading.Event = None
-    ):
+    def __init__(self, config, output_dir: str = "", shutdown_event: threading.Event = None):
         if shutdown_event is None:
             raise ValueError("shutdown_event must be provided")
         self.shutdown_event = shutdown_event
@@ -67,19 +65,13 @@ class AutograsperBase(ABC):
             experiment_config = config["experiment"]
             self.camera_matrix = np.array(camera_config["m"])
             self.distortion_coeffs = np.array(camera_config["d"])
-            self.record_only_after_action = bool(
-                camera_config["record_only_after_action"]
-            )
+            self.record_only_after_action = bool(camera_config["record_only_after_action"])
             self.robot_idx = experiment_config["robot_idx"]
             self.time_between_orders = experiment_config["time_between_orders"]
         except KeyError as e:
-            raise ValueError(
-                f"Missing configuration key in AutograsperBase: {e}"
-            ) from e
+            raise ValueError(f"Missing configuration key in AutograsperBase: {e}") from e
         except TypeError as e:
-            raise ValueError(
-                f"Invalid configuration format in AutograsperBase: {e}"
-            ) from e
+            raise ValueError(f"Invalid configuration format in AutograsperBase: {e}") from e
 
         self.robot = self.initialize_robot(self.robot_idx, self.token)
         self.bottom_image = get_undistorted_bottom_image(
@@ -95,63 +87,76 @@ class AutograsperBase(ABC):
     def record_current_state(self):
         """Request a state record and wait until it is processed or shutdown is signaled."""
         self.request_state_record = True
-        self.state_recorded_event.clear()  # Clear any previous signal.
+        self.state_recorded_event.clear()
         while not self.shutdown_event.is_set():
             if self.state_recorded_event.wait(timeout=0.1):
                 return
         return
 
     def wait_for_start_signal(self):
-        """Wait for the start event, but check periodically for shutdown."""
+        """Wait for the start event, checking periodically for shutdown."""
         while not self.shutdown_event.is_set():
             if self.start_event.wait(timeout=0.1):
                 return
         return
 
     def run_grasping(self):
+        """
+        State machine loop:
+          - STARTUP: Run startup logic, then move to ACTIVE.
+          - ACTIVE: Wait for start signal, then perform task.
+          - RESETTING: After task, sleep and either recover (if failed) or reset.
+        """
         while self.state != RobotActivity.FINISHED and not self.shutdown_event.is_set():
-            self.startup()
-            self.state = RobotActivity.ACTIVE
-            self.wait_for_start_signal()
-            self.start_event.clear()  # Clear the event for the next cycle
-            try:
-                self.perform_task()
-            except Exception as e:
-                print(f"Unexpected error during perform_task: {e}")
-                self.failed = True
-                self.shutdown_event.set()
-                raise
-            if self.state == RobotActivity.FINISHED or self.shutdown_event.is_set():
-                break
-            sleep_with_shutdown(self.task_time_margin, self.shutdown_event)
-            self.state = RobotActivity.RESETTING
-            sleep_with_shutdown(self.task_time_margin, self.shutdown_event)
-            if self.failed:
-                print("Experiment failed, recovering")
-                self.recover_after_fail()
-                self.failed = False
+            if self.state == RobotActivity.STARTUP:
+                self.startup()
+                self.state = RobotActivity.ACTIVE
+            elif self.state == RobotActivity.ACTIVE:
+                self.wait_for_start_signal()
+                self.start_event.clear()  # Clear for next cycle
+                try:
+                    self.perform_task()
+                except Exception as e:
+                    print(f"Unexpected error during perform_task: {e}")
+                    self.failed = True
+                    self.shutdown_event.set()
+                    raise
+                if self.shutdown_event.is_set() or self.state == RobotActivity.FINISHED:
+                    break
+                self.state = RobotActivity.RESETTING
+            elif self.state == RobotActivity.RESETTING:
+                sleep_with_shutdown(self.task_time_margin, self.shutdown_event)
+                if self.failed:
+                    print("Experiment failed, recovering")
+                    self.recover_after_fail()
+                    self.failed = False
+                else:
+                    self.reset_task()
+                self.state = RobotActivity.STARTUP
             else:
-                self.reset_task()
-            self.state = RobotActivity.STARTUP
+                break
 
     def recover_after_fail(self):
+        """Override to implement recovery logic after failure."""
         pass
 
     @abstractmethod
     def perform_task(self):
-        # Default implementation; override this in your subclass.
+        """
+        Override this method to perform robot actions.
+        Default implementation prints a message periodically.
+        """
         while not self.shutdown_event.is_set():
-            print(
-                "GRASPER: No task defined. Override perform_task() to perform robot actions."
-            )
+            print("GRASPER: No task defined. Override perform_task() to perform robot actions.")
             sleep_with_shutdown(0.5, self.shutdown_event)
         print("GRASPER: Exiting perform_task() due to shutdown signal.")
 
     def reset_task(self):
+        """Override to implement logic for resetting between tasks."""
         pass
 
     def startup(self):
-        # Any initialization logic before starting a task.
+        """Override to implement initialization logic before a task."""
         pass
 
     def queue_orders(
@@ -176,6 +181,7 @@ class AutograsperBase(ABC):
                 and (self.state in (RobotActivity.ACTIVE, RobotActivity.RESETTING))
             ):
                 self.record_current_state()
+
 
     # CG1Specific
     def manual_control(self, step_size=0.1, state=None, time_between_orders=None):

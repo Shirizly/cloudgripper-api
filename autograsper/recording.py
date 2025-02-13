@@ -1,4 +1,3 @@
-# recording.py
 import os
 import sys
 import time
@@ -16,6 +15,7 @@ if project_root not in sys.path:
 
 from client.cloudgripper_client import GripperRobot
 from library.utils import convert_ndarray_to_list, get_undistorted_bottom_image
+from file_manager import FileManager
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +76,13 @@ class Recorder:
 
     def _initialize_directories(self) -> None:
         if self.save_images_individually:
-            self.output_images_dir = os.path.join(self.output_dir, "Images")
-            self.output_bottom_images_dir = os.path.join(
-                self.output_dir, "Bottom_Images"
+            self.output_images_dir, self.output_bottom_images_dir = (
+                FileManager.create_image_dirs(self.output_dir)
             )
-            os.makedirs(self.output_images_dir, exist_ok=True)
-            os.makedirs(self.output_bottom_images_dir, exist_ok=True)
         else:
-            self.output_video_dir = os.path.join(self.output_dir, "Video")
-            self.output_bottom_video_dir = os.path.join(self.output_dir, "Bottom_Video")
-            os.makedirs(self.output_video_dir, exist_ok=True)
-            os.makedirs(self.output_bottom_video_dir, exist_ok=True)
+            self.output_video_dir, self.output_bottom_video_dir = (
+                FileManager.create_video_dirs(self.output_dir)
+            )
 
     def _start_new_video(self) -> Tuple[cv2.VideoWriter, cv2.VideoWriter]:
         if not self.ensure_images():
@@ -114,7 +110,7 @@ class Recorder:
             return None, None
 
     def record(self) -> None:
-        """Record video or images. Note that image display is now handled by the coordinator."""
+        """Record video or images. Image display is handled by the coordinator."""
         self._prepare_new_recording()
         try:
             while not self.stop_flag and not self.shutdown_event.is_set():
@@ -237,13 +233,10 @@ class Recorder:
 
             state_file = os.path.join(self.output_dir, "states.json")
             data: List[Dict[str, Any]] = []
-
             if os.path.exists(state_file):
                 with open(state_file, "r") as file:
                     data = json.load(file)
-
             data.append(state)
-
             with open(state_file, "w") as file:
                 json.dump(data, file, indent=4)
         except Exception as e:

@@ -11,6 +11,7 @@ import threading
 
 from grasper import RobotActivity, AutograsperBase
 from recording import Recorder
+from file_manager import FileManager
 
 logger = logging.getLogger(__name__)
 
@@ -135,15 +136,10 @@ class DataCollectionCoordinator:
             "recorded_data",
             self.experiment_name,
         )
-        if not os.path.exists(base_dir):
-            os.makedirs(base_dir, exist_ok=True)
-        session_ids = [int(x) for x in os.listdir(base_dir) if x.isdigit()]
-        new_id = max(session_ids, default=0) + 1
-        self.session_dir = os.path.join(base_dir, str(new_id))
-        self.task_dir = os.path.join(self.session_dir, "task")
-        self.restore_dir = os.path.join(self.session_dir, "restore")
-        os.makedirs(self.task_dir, exist_ok=True)
-        os.makedirs(self.restore_dir, exist_ok=True)
+        # Use FileManager to create session directories.
+        self.session_dir, self.task_dir, self.restore_dir = (
+            FileManager.get_session_dirs(base_dir)
+        )
 
     def _on_active_state(self):
         if self.save_data:
@@ -172,7 +168,8 @@ class DataCollectionCoordinator:
         status = "fail" if self.autograsper.failed else "success"
         logger.info(f"Task result: {status}")
         if self.save_data:
-            with open(os.path.join(self.session_dir, "status.txt"), "w") as f:
+            status_file = os.path.join(self.session_dir, "status.txt")
+            with open(status_file, "w") as f:
                 f.write(status)
             self.autograsper.output_dir = self.restore_dir
             if self.shared_state.recorder:
@@ -193,12 +190,11 @@ class DataCollectionCoordinator:
             max_workers=4, thread_name_prefix="Coord"
         ) as executor:
             self.executor = executor  # Save reference for later submissions.
-            # Submit the three primary tasks.
-            futures = []
-            futures.append(executor.submit(self.autograsper.run_grasping))
-            futures.append(executor.submit(self._monitor_state))
-            futures.append(executor.submit(self._process_messages))
-
+            futures = [
+                executor.submit(self.autograsper.run_grasping),
+                executor.submit(self._monitor_state),
+                executor.submit(self._process_messages),
+            ]
             try:
                 concurrent.futures.wait(
                     futures, return_when=concurrent.futures.FIRST_EXCEPTION
