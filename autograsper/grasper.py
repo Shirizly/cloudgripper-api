@@ -6,15 +6,14 @@ from enum import Enum
 from typing import List, Tuple
 import ast
 import numpy as np
-from dotenv import load_dotenv
 import threading
+from dotenv import load_dotenv
 
-# Ensure the project root is in the system path
+# Ensure project root is in the system path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# Import project-specific modules
 from client.cloudgripper_client import GripperRobot
 from library.utils import (
     OrderType,
@@ -23,7 +22,6 @@ from library.utils import (
     parse_config,
 )
 
-# Load environment variables
 load_dotenv()
 
 
@@ -45,44 +43,36 @@ class AutograsperBase(ABC):
         self.failed = False
 
         self.state = RobotActivity.STARTUP
-        # Replace boolean flag with an event for waiting.
+        # Use an event to wait for the start signal instead of busy-waiting.
         self.start_event = threading.Event()
+        # New event to signal that a state record has been processed.
+        self.state_recorded_event = threading.Event()
 
-        # TODO: make this private
         self.request_state_record = False
-
-        # fudge time to ensure frames at the start/finish of task/resetting
-        # TODO: make this part of default config file like camera variables
         self.task_time_margin = 2
         self.robot_state = None
 
         config = parse_config(config_file)
-
         try:
-            # CG1Specific
             camera_cfg = config["camera"]
             self.camera_matrix = np.array(ast.literal_eval(camera_cfg["m"]))
             self.distortion_coeffs = np.array(ast.literal_eval(camera_cfg["d"]))
             self.record_only_after_action = bool(
                 ast.literal_eval(camera_cfg["record_only_after_action"])
             )
-
             experiment_cfg = config["experiment"]
             self.robot_idx = ast.literal_eval(experiment_cfg["robot_idx"])
             self.time_between_orders = ast.literal_eval(
                 experiment_cfg["time_between_orders"]
             )
-
         except Exception as e:
             raise ValueError("Grasper config.ini ERROR: ", e) from e
 
         self.robot = self.initialize_robot(self.robot_idx, self.token)
-
         self.bottom_image = get_undistorted_bottom_image(
             self.robot, self.camera_matrix, self.distortion_coeffs
         )
 
-    # CG1Specific
     def initialize_robot(self, robot_idx: int, token: str) -> GripperRobot:
         try:
             return GripperRobot(robot_idx, token)
@@ -90,45 +80,40 @@ class AutograsperBase(ABC):
             raise ValueError("Invalid robot ID or token: ", e) from e
 
     def record_current_state(self):
+        """Request a state record and wait until it is processed."""
         self.request_state_record = True
-        while self.request_state_record:
-            time.sleep(0.05)
+        self.state_recorded_event.clear()  # Clear any previous signal.
+        # Wait until the coordinator signals that recording is done.
+        self.state_recorded_event.wait(
+            timeout=5
+        )  # Optional timeout to avoid indefinite waiting.
 
     def wait_for_start_signal(self):
-        # Wait until the coordinator signals that the start event has been set.
         self.start_event.wait()
 
     def run_grasping(self):
         while self.state != RobotActivity.FINISHED:
             self.startup()
             self.state = RobotActivity.ACTIVE
-
-            # Wait for the start signal from the coordinator.
             self.wait_for_start_signal()
-            # Once the event is set, clear it for the next cycle.
-            self.start_event.clear()
-
+            self.start_event.clear()  # Clear the start event for the next cycle
             try:
                 self.perform_task()
             except Exception as e:
                 print(f"Unexpected error during perform_task: {e}")
                 self.failed = True
                 raise
-
             if self.state == RobotActivity.FINISHED:
                 break
-
             time.sleep(self.task_time_margin)
             self.state = RobotActivity.RESETTING
             time.sleep(self.task_time_margin)
-
             if self.failed:
                 print("Experiment failed, recovering")
                 self.recover_after_fail()
                 self.failed = False
             else:
                 self.reset_task()
-
             self.state = RobotActivity.STARTUP
 
     def recover_after_fail(self):
@@ -146,7 +131,7 @@ class AutograsperBase(ABC):
         pass
 
     def startup(self):
-        # Implement any initialization logic required before starting a task.
+        # Any initialization logic before starting a task.
         pass
 
     def queue_orders(
