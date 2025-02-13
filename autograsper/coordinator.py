@@ -5,14 +5,12 @@ import time
 import traceback
 import ast
 import numpy as np
-from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import Optional
+import cv2
 
 # -------------
 from grasper import RobotActivity, AutograsperBase
-from custom_graspers.random_grasping_task import RandomGrasper
-from custom_graspers.example_grasper import ExampleGrasper
-from library.rgb_object_tracker import all_objects_are_visible
 from recording import Recorder
 from library.utils import parse_config
 
@@ -21,8 +19,7 @@ logger = logging.getLogger(__name__)
 # Global event for error handling across threads
 ERROR_EVENT = threading.Event()
 
-# Locks for thread-safe operations
-STATE_LOCK = threading.Lock()
+# Lock for thread-safe access to bottom image for display
 BOTTOM_IMAGE_LOCK = threading.Lock()
 
 
@@ -36,7 +33,6 @@ class SharedState:
     state: str = RobotActivity.STARTUP
     recorder: Optional[Recorder] = None
     recorder_thread: Optional[threading.Thread] = None
-    bottom_image_thread: Optional[threading.Thread] = None
 
 
 class DataCollectionCoordinator:
@@ -53,39 +49,33 @@ class DataCollectionCoordinator:
     def run(self):
         """
         Main controller entry point: starts threads,
-        monitors states, and wraps everything in try/finally.
+        monitors states, and displays bottom image safely in the main thread.
         """
-
         # Threads
-        self.autograsper_thread: Optional[threading.Thread] = (None,)
+        self.autograsper_thread: Optional[threading.Thread] = None
         self.monitor_thread: Optional[threading.Thread] = None
 
         try:
             self._start_threads()
+            # Main loop: monitor state changes and display the bottom image
             self._handle_state_changes()
         except Exception as e:
             self._handle_error(e)
         finally:
             self._cleanup()
-
-    # --------------------
-    # Private Methods
-    # --------------------
+            # Ensure any OpenCV windows are closed in the main thread
+            cv2.destroyAllWindows()
 
     def _load_config(self, config_file: str):
         self.config = parse_config(config_file)
-
         try:
             experiment_cfg = self.config["experiment"]
             camera_cfg = self.config["camera"]
-
             self.experiment_name = ast.literal_eval(experiment_cfg["name"])
             self.timeout_between_experiments = ast.literal_eval(
                 experiment_cfg["timeout_between_experiments"]
             )
-
             self.save_data = bool(ast.literal_eval(camera_cfg["record"]))
-
         except Exception as e:
             raise ValueError("ERROR reading from config.ini: ", e)
 
@@ -100,16 +90,13 @@ class DataCollectionCoordinator:
         """Monitors and updates shared_state based on autograsper's state."""
         try:
             while not ERROR_EVENT.is_set():
-                with STATE_LOCK:
-                    self._check_if_record_is_requested()
-
+                # Check if a record is requested.
+                self._check_if_record_is_requested()
+                self.shared_state.state = self.autograsper.state
+                # Update robot state based on the recorder's state.
+                if self.shared_state.recorder is not None:
                     self.autograsper.robot_state = self.shared_state.recorder.state
 
-                    if self.shared_state.state != self.autograsper.state:
-                        self.shared_state.state = self.autograsper.state
-                        logger.info(f"State changed to: {self.shared_state.state}")
-                        if self.shared_state.state == RobotActivity.FINISHED:
-                            break
                 time.sleep(0.1)
         except Exception as e:
             self._handle_error(e)
@@ -119,35 +106,19 @@ class DataCollectionCoordinator:
             self.autograsper.request_state_record
             and self.shared_state.recorder is not None
         ):
-            if self.shared_state.recorder:
-                self.shared_state.recorder.take_snapshot += 1
+            self.shared_state.recorder.take_snapshot += 1
             while self.shared_state.recorder.take_snapshot > 0:
                 time.sleep(0.1)
             self.autograsper.request_state_record = False
 
-    def _monitor_bottom_image(self):
-        """Copies the latest bottom image from the recorder to the autograsper."""
-        try:
-            while not ERROR_EVENT.is_set():
-                if (
-                    self.shared_state.recorder
-                    and self.shared_state.recorder.bottom_image is not None
-                ):
-                    with BOTTOM_IMAGE_LOCK:
-                        self.autograsper.bottom_image = np.copy(
-                            self.shared_state.recorder.bottom_image
-                        )
-                time.sleep(0.1)
-        except Exception as e:
-            self._handle_error(e)
-
     def _handle_state_changes(self):
-        """Main loop that responds to changes in robot state."""
+        """Main loop that responds to changes in robot state and displays bottom image."""
         prev_state = RobotActivity.STARTUP
         self.session_dir, self.task_dir, self.restore_dir = "", "", ""
 
         while not ERROR_EVENT.is_set():
-            with STATE_LOCK:
+            # Process state changes in a thread-safe manner.
+            with threading.Lock():
                 current_state = self.shared_state.state
                 if current_state != prev_state:
                     self._on_state_transition(prev_state, current_state)
@@ -166,6 +137,25 @@ class DataCollectionCoordinator:
 
                     prev_state = current_state
 
+            # Safely display the bottom image in the main thread.
+            if self.shared_state.recorder is not None:
+                with BOTTOM_IMAGE_LOCK:
+                    bottom_img = None
+                    if self.shared_state.recorder.bottom_image is not None:
+                        # Copy the image under lock to avoid concurrent modifications.
+                        bottom_img = self.shared_state.recorder.bottom_image.copy()
+                if bottom_img is not None:
+                    try:
+                        # Display the bottom image in a window.
+                        # Import here to ensure it's used only in the main thread.
+                        import cv2
+
+                        cv2.imshow("Bottom Image", bottom_img)
+                        # cv2.waitKey(1) returns immediately, allowing our loop to continue.
+                        if cv2.waitKey(1) & 0xFF == ord("q"):
+                            ERROR_EVENT.set()
+                    except Exception as e:
+                        logger.error("Error during image display: %s", e)
             time.sleep(0.1)
 
     def _on_state_transition(self, old_state, new_state):
@@ -199,10 +189,9 @@ class DataCollectionCoordinator:
         """Actions to perform when transitioning to ACTIVE."""
         if self.save_data:
             self.autograsper.output_dir = self.task_dir
-
         self._ensure_recorder_running(self.task_dir)
         time.sleep(0.5)
-        self.autograsper.start_flag = True
+        self.autograsper.start_event.set()
 
     def _ensure_recorder_running(self, output_dir: str):
         """Ensures the recorder is created and running."""
@@ -212,18 +201,11 @@ class DataCollectionCoordinator:
                 target=self.shared_state.recorder.record
             )
             self.shared_state.recorder_thread.start()
-
-            self.shared_state.bottom_image_thread = threading.Thread(
-                target=self._monitor_bottom_image
-            )
-            self.shared_state.bottom_image_thread.start()
-
         if self.save_data:
             self.shared_state.recorder.start_new_recording(output_dir)
 
     def _setup_recorder(self, output_dir: str) -> Recorder:
         """Initializes and returns a Recorder instance based on config."""
-
         return Recorder(
             self.config,
             output_dir=output_dir,
@@ -238,9 +220,7 @@ class DataCollectionCoordinator:
         if self.save_data:
             with open(os.path.join(self.session_dir, "status.txt"), "w") as f:
                 f.write(status)
-
             self.autograsper.output_dir = self.restore_dir
-
             if self.shared_state.recorder:
                 self.shared_state.recorder.start_new_recording(self.restore_dir)
 
@@ -255,17 +235,10 @@ class DataCollectionCoordinator:
                 and self.shared_state.recorder_thread.is_alive()
             ):
                 self.shared_state.recorder_thread.join()
-            if (
-                self.shared_state.bottom_image_thread
-                and self.shared_state.bottom_image_thread.is_alive()
-            ):
-                self.shared_state.bottom_image_thread.join()
 
     def _cleanup(self):
         """Sets the global error event and joins main threads."""
         ERROR_EVENT.set()
-
-        # Join the main threads
         if self.autograsper_thread and self.autograsper_thread.is_alive():
             self.autograsper_thread.join()
         if self.monitor_thread and self.monitor_thread.is_alive():

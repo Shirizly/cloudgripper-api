@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import logging
+import threading
 from typing import Any, Tuple, List, Dict
 import cv2
 import ast
@@ -14,7 +15,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-#CG1Specific
+# CG1Specific
 from client.cloudgripper_client import (
     GripperRobot,
 )  # Assuming this is the correct import
@@ -45,7 +46,6 @@ class Recorder:
             self.record_only_after_action = bool(
                 ast.literal_eval(camera_cfg["record_only_after_action"])
             )
-
             self.save_images_individually = bool(
                 ast.literal_eval(camera_cfg["save_images_individually"])
             )
@@ -66,12 +66,13 @@ class Recorder:
         self.bottom_image = None
         self.pause = False
 
-        self.state = None
-
         # For when record_only_after_action is True
         self.take_snapshot = 0
 
-        
+        # Initialize locks for thread-safe access
+        self.image_lock = threading.Lock()
+        self.writer_lock = threading.Lock()
+
         self._update()
 
         # Initialize state variables
@@ -102,7 +103,7 @@ class Recorder:
     def _start_new_video(self) -> Tuple[cv2.VideoWriter, cv2.VideoWriter]:
         """Start new video writers for top and bottom cameras."""
         if not self.ensure_images():
-            return
+            return None, None
 
         video_filename_top = os.path.join(
             self.output_video_dir, f"video_{self.video_counter}.mp4"
@@ -112,18 +113,17 @@ class Recorder:
         )
 
         if self.save_data:
+            with self.image_lock:
+                top_shape = self.image_top.shape[1::-1]
+                bottom_shape = self.bottom_image.shape[1::-1]
             video_writer_top = cv2.VideoWriter(
-                video_filename_top, self.FOURCC, self.FPS, self.image_top.shape[1::-1]
+                video_filename_top, self.FOURCC, self.FPS, top_shape
             )
             video_writer_bottom = cv2.VideoWriter(
-                video_filename_bottom,
-                self.FOURCC,
-                self.FPS,
-                self.bottom_image.shape[1::-1],
+                video_filename_bottom, self.FOURCC, self.FPS, bottom_shape
             )
 
             return video_writer_top, video_writer_bottom
-
         else:
             return None, None
 
@@ -142,7 +142,7 @@ class Recorder:
                         if self.save_data:
                             self._capture_frame()
 
-                        # Only restart video writers for video mode, not when saving images individually.
+                        # Restart video writers periodically when saving video
                         if (
                             self.clip_length
                             and self.frame_counter % self.clip_length == 0
@@ -151,6 +151,11 @@ class Recorder:
                         ):
                             self.video_counter += 1
                             self._start_or_restart_video_writers()
+
+                        # Log the current frame timestamp for debugging
+                        logging.debug(
+                            f"Frame {self.frame_counter}: timestamp = {self.timestamp}"
+                        )
 
                         time.sleep(1 / self.FPS)
                         if self.save_data:
@@ -162,23 +167,23 @@ class Recorder:
                     else:
                         time.sleep(1 / self.FPS)
 
-                    image_to_show = copy.copy(self.bottom_image)
-                    cv2.imshow(f"ImageBottom_{self.robot_idx}", image_to_show)
-                    if cv2.waitKey(1) & 0xFF == ord("q"):
-                        self.stop_flag = True
+                    # Removed cv2.imshow and cv2.waitKey to avoid GUI calls in a background thread
+                else:
+                    time.sleep(1 / self.FPS)
         except Exception as e:
             logging.error("An error occurred: %s", e)
         finally:
             self._release_writers()
-            cv2.destroyAllWindows()
+            # No cv2.destroyAllWindows() since no windows are created
 
     def _update(self) -> None:
         """Update images and state from the robot."""
         data = self.robot.get_all_states()
-        self.image_top = data[0]
-        self.bottom_image = get_undistorted_bottom_image(
-            self.robot, self.camera_matrix, self.distortion_coeffs
-        )
+        with self.image_lock:
+            self.image_top = data[0]
+            self.bottom_image = get_undistorted_bottom_image(
+                self.robot, self.camera_matrix, self.distortion_coeffs
+            )
         self.state = data[2]
         self.timestamp = data[3]
 
@@ -190,6 +195,9 @@ class Recorder:
         try:
             if not self.ensure_images():
                 return
+            with self.image_lock:
+                top_image = self.image_top.copy()
+                bottom_image = self.bottom_image.copy()
             if self.save_images_individually:
                 # Save each image as a separate JPEG file
                 top_filename = os.path.join(
@@ -199,31 +207,39 @@ class Recorder:
                     self.output_bottom_images_dir,
                     f"image_bottom_{self.frame_counter}.jpeg",
                 )
-                cv2.imwrite(top_filename, self.image_top)
-                cv2.imwrite(bottom_filename, self.bottom_image)
+                cv2.imwrite(top_filename, top_image)
+                cv2.imwrite(bottom_filename, bottom_image)
             else:
-                if self.video_writer_top and self.video_writer_bottom:
-                    self.video_writer_top.write(self.image_top)
-                    self.video_writer_bottom.write(self.bottom_image)
-                else:
-                    logging.warning("Video writers not initialized.")
+                with self.writer_lock:
+                    if (
+                        self.video_writer_top is not None
+                        and self.video_writer_bottom is not None
+                    ):
+                        self.video_writer_top.write(top_image)
+                        self.video_writer_bottom.write(bottom_image)
+                    else:
+                        logging.warning("Video writers not initialized.")
         except Exception as e:
             logging.error("Error capturing frame: %s", e)
 
     def _start_or_restart_video_writers(self) -> None:
         """Start or restart video writers (only used when saving video)."""
         if not self.save_images_individually:
-            self._release_writers()  # Ensure the old writers are released
-            self.video_writer_top, self.video_writer_bottom = self._start_new_video()
+            with self.writer_lock:
+                self._release_writers()  # Ensure the old writers are released
+                self.video_writer_top, self.video_writer_bottom = (
+                    self._start_new_video()
+                )
 
     def _release_writers(self) -> None:
         """Release the video writers."""
-        if self.video_writer_top:
-            self.video_writer_top.release()
-            self.video_writer_top = None
-        if self.video_writer_bottom:
-            self.video_writer_bottom.release()
-            self.video_writer_bottom = None
+        with self.writer_lock:
+            if self.video_writer_top:
+                self.video_writer_top.release()
+                self.video_writer_top = None
+            if self.video_writer_bottom:
+                self.video_writer_bottom.release()
+                self.video_writer_bottom = None
 
     def start_new_recording(self, new_output_dir: str) -> None:
         """Start a new recording session with a new output directory."""
@@ -246,9 +262,12 @@ class Recorder:
     def save_state(self) -> None:
         """Save the state of the robot to a JSON file."""
         try:
-            state = self.state.copy()
+            # Copy state and timestamp for saving
+            state = self.state.copy() if isinstance(self.state, dict) else self.state
             timestamp = self.timestamp
             state = convert_ndarray_to_list(state)
+            if not isinstance(state, dict):
+                state = {"state": state}
             state["time"] = timestamp
 
             state_file = os.path.join(self.output_dir, "states.json")
@@ -274,11 +293,14 @@ class Recorder:
         If after update either image is still None, logs an error and returns False.
         Otherwise, returns True.
         """
-        if self.image_top is None or self.bottom_image is None:
-            self._update()
+        with self.image_lock:
+            if self.image_top is None or self.bottom_image is None:
+                self._update()
 
-        if self.image_top is None or self.bottom_image is None:
-            logging.error("ensure_images: Failed to obtain valid images from the robot after update.")
-            return False
+            if self.image_top is None or self.bottom_image is None:
+                logging.error(
+                    "ensure_images: Failed to obtain valid images from the robot after update."
+                )
+                return False
 
         return True
