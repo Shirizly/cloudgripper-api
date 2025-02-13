@@ -1,7 +1,6 @@
 import os
 import logging
 import time
-import ast
 import cv2
 from dataclasses import dataclass
 from typing import Optional
@@ -10,7 +9,6 @@ import concurrent.futures
 
 from grasper import RobotActivity, AutograsperBase
 from recording import Recorder, SHUTDOWN_EVENT
-from library.utils import parse_config
 
 logger = logging.getLogger(__name__)
 
@@ -36,23 +34,18 @@ class DataCollectionCoordinator:
     Thread lifecycles are managed via a ThreadPoolExecutor.
     """
 
-    def __init__(self, config_file, grasper: AutograsperBase):
-        self._load_config(config_file)
+    def __init__(self, config, grasper: AutograsperBase):
+        self.config = config
         self.shared_state = SharedState()
         self.autograsper = grasper
-        # Dedicated message queue for inter-thread communication.
         self.message_queue = Queue()
 
-    def _load_config(self, config_file: str):
-        self.config = parse_config(config_file)
         try:
-            experiment_cfg = self.config["experiment"]
-            camera_cfg = self.config["camera"]
-            self.experiment_name = ast.literal_eval(experiment_cfg["name"])
-            self.timeout_between_experiments = ast.literal_eval(
-                experiment_cfg["timeout_between_experiments"]
-            )
-            self.save_data = bool(ast.literal_eval(camera_cfg["record"]))
+            self.experiment_name = self.config["experiment"]["name"]
+            self.timeout_between_experiments = self.config["experiment"][
+                "timeout_between_experiments"
+            ]
+            self.save_data = self.config["camera"]["record"]
         except Exception as e:
             raise ValueError("ERROR reading from config.ini: ", e)
 

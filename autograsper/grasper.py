@@ -4,7 +4,6 @@ import sys
 import time
 from enum import Enum
 from typing import List, Tuple
-import ast
 import numpy as np
 import threading
 from dotenv import load_dotenv
@@ -15,16 +14,18 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from client.cloudgripper_client import GripperRobot
-from library.utils import get_undistorted_bottom_image, parse_config, OrderType, execute_order
+from library.utils import get_undistorted_bottom_image, OrderType, execute_order
 from recording import SHUTDOWN_EVENT
 
 load_dotenv()
+
 
 class RobotActivity(Enum):
     ACTIVE = 1
     RESETTING = 2
     FINISHED = 3
     STARTUP = 4
+
 
 def sleep_with_shutdown(duration: float):
     """Sleep in small increments, checking for shutdown."""
@@ -34,8 +35,9 @@ def sleep_with_shutdown(duration: float):
             break
         time.sleep(0.05)
 
+
 class AutograsperBase(ABC):
-    def __init__(self, config_file, output_dir: str = ""):
+    def __init__(self, config, output_dir: str = ""):
         self.token = os.getenv("CLOUDGRIPPER_TOKEN")
         if not self.token:
             raise ValueError("CLOUDGRIPPER_TOKEN environment variable not set")
@@ -54,20 +56,21 @@ class AutograsperBase(ABC):
         self.task_time_margin = 2
         self.robot_state = None
 
-        config = parse_config(config_file)
         try:
-            camera_cfg = config["camera"]
-            self.camera_matrix = np.array(ast.literal_eval(camera_cfg["m"]))
-            self.distortion_coeffs = np.array(ast.literal_eval(camera_cfg["d"]))
-            self.record_only_after_action = bool(ast.literal_eval(camera_cfg["record_only_after_action"]))
-            experiment_cfg = config["experiment"]
-            self.robot_idx = ast.literal_eval(experiment_cfg["robot_idx"])
-            self.time_between_orders = ast.literal_eval(experiment_cfg["time_between_orders"])
+            self.camera_matrix = np.array(config["camera"]["m"])
+            self.distortion_coeffs = np.array(config["camera"]["d"])
+            self.record_only_after_action = bool(
+                config["camera"]["record_only_after_action"]
+            )
+            self.robot_idx = config["experiment"]["robot_idx"]
+            self.time_between_orders = config["experiment"]["time_between_orders"]
         except Exception as e:
-            raise ValueError("Grasper config.ini ERROR: ", e) from e
+            raise ValueError("Grasper config.yaml ERROR: ", e) from e
 
         self.robot = self.initialize_robot(self.robot_idx, self.token)
-        self.bottom_image = get_undistorted_bottom_image(self.robot, self.camera_matrix, self.distortion_coeffs)
+        self.bottom_image = get_undistorted_bottom_image(
+            self.robot, self.camera_matrix, self.distortion_coeffs
+        )
 
     def initialize_robot(self, robot_idx: int, token: str) -> GripperRobot:
         try:
@@ -125,7 +128,9 @@ class AutograsperBase(ABC):
     def perform_task(self):
         # Default implementation; override this in your subclass.
         while not SHUTDOWN_EVENT.is_set():
-            print("GRASPER: No task defined. Override perform_task() to perform robot actions.")
+            print(
+                "GRASPER: No task defined. Override perform_task() to perform robot actions."
+            )
             sleep_with_shutdown(0.5)
         print("GRASPER: Exiting perform_task() due to shutdown signal.")
 
@@ -152,10 +157,12 @@ class AutograsperBase(ABC):
                 break
             execute_order(self.robot, order, output_dir, reverse_xy)
             sleep_with_shutdown(time_between_orders)
-            if (record and self.record_only_after_action and 
-                (self.state in (RobotActivity.ACTIVE, RobotActivity.RESETTING))):
+            if (
+                record
+                and self.record_only_after_action
+                and (self.state in (RobotActivity.ACTIVE, RobotActivity.RESETTING))
+            ):
                 self.record_current_state()
-
 
     # CG1Specific
     def manual_control(self, step_size=0.1, state=None, time_between_orders=None):

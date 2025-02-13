@@ -5,9 +5,7 @@ import json
 import logging
 from typing import Any, Tuple, List, Dict
 import cv2
-import ast
 import numpy as np
-import copy
 import threading
 
 # Ensure project root is in sys.path
@@ -23,33 +21,33 @@ logging.basicConfig(level=logging.INFO)
 SHUTDOWN_EVENT = threading.Event()
 
 
-
 class Recorder:
     FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 
     def __init__(self, config: Any, output_dir: str):
         try:
-            experiment_cfg = config["experiment"]
-            self.experiment_name = ast.literal_eval(experiment_cfg["name"])
-            self.robot_idx = ast.literal_eval(experiment_cfg["robot_idx"])
+            self.camera_matrix = np.array(config["camera"]["m"])
+            self.distortion_coeffs = np.array(config["camera"]["d"])
+            self.record_only_after_action = bool(
+                config["camera"]["record_only_after_action"]
+            )
+            self.robot_idx = config["experiment"]["robot_idx"]
 
-            camera_cfg = config["camera"]
-            self.camera_matrix = np.array(ast.literal_eval(camera_cfg["m"]))
-            self.distortion_coeffs = np.array(ast.literal_eval(camera_cfg["d"]))
+            self.robot_idx = config["experiment"]["robot_idx"]
 
-            self.save_data = bool(ast.literal_eval(camera_cfg["record"]))
-            self.FPS = int(ast.literal_eval(camera_cfg["fps"]))
+            self.save_data = bool(config["camera"]["record"])
+            self.FPS = int(config["camera"]["fps"])
 
             self.record_only_after_action = bool(
-                ast.literal_eval(camera_cfg["record_only_after_action"])
+                config["camera"]["record_only_after_action"]
             )
             self.save_images_individually = bool(
-                ast.literal_eval(camera_cfg["save_images_individually"])
+                config["camera"]["save_images_individually"]
             )
 
             self.clip_length = None
-            if "clip_length" in camera_cfg:
-                self.clip_length = ast.literal_eval(camera_cfg["clip_length"])
+            if "clip_length" in config["camera"]:
+                self.clip_length = config["camera"]["clip_length"]
         except Exception as e:
             raise ValueError("Recorder config.ini ERROR") from e
 
