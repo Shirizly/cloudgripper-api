@@ -1,3 +1,4 @@
+# coordinator.py
 import os
 import logging
 import time
@@ -6,9 +7,10 @@ from dataclasses import dataclass
 from typing import Optional
 from queue import Queue, Empty
 import concurrent.futures
+import threading
 
 from grasper import RobotActivity, AutograsperBase
-from recording import Recorder, SHUTDOWN_EVENT
+from recording import Recorder
 
 logger = logging.getLogger(__name__)
 
@@ -27,34 +29,36 @@ class DataCollectionCoordinator:
     """
     Orchestrates the autograsper, manages recording, and coordinates state changes
     and image updates via a centralized message queue.
-
-    Responsibilities are separated into:
-      - State monitoring: polls the autograsper/recorder for updates.
-      - Message processing: handles state transitions and image display.
-    Thread lifecycles are managed via a ThreadPoolExecutor.
     """
 
-    def __init__(self, config, grasper: AutograsperBase):
+    def __init__(
+        self, config, grasper: AutograsperBase, shutdown_event: threading.Event
+    ):
         self.config = config
+        self.shutdown_event = shutdown_event
         self.shared_state = SharedState()
         self.autograsper = grasper
         self.message_queue = Queue()
 
+        # Read configuration with explicit error handling
         try:
-            self.experiment_name = self.config["experiment"]["name"]
-            self.timeout_between_experiments = self.config["experiment"][
+            experiment_config = config["experiment"]
+            camera_config = config["camera"]
+            self.experiment_name = experiment_config["name"]
+            self.timeout_between_experiments = experiment_config[
                 "timeout_between_experiments"
             ]
-            self.save_data = self.config["camera"]["record"]
-        except Exception as e:
-            raise ValueError("ERROR reading from config.ini: ", e)
+            self.save_data = camera_config["record"]
+        except KeyError as e:
+            raise ValueError(f"Missing configuration key in coordinator: {e}") from e
+        except TypeError as e:
+            raise ValueError(f"Invalid configuration format in coordinator: {e}") from e
 
     def _monitor_state(self):
         """
         Polls the autograsper and recorder for updates and posts messages to the message queue.
-        Uses a blocking wait on queue operations (with a timeout) to avoid tight polling.
         """
-        while not SHUTDOWN_EVENT.is_set():
+        while not self.shutdown_event.is_set():
             # Post state update message.
             state_msg = {"type": "state_update", "state": self.autograsper.state}
             self.message_queue.put(state_msg)
@@ -67,8 +71,7 @@ class DataCollectionCoordinator:
                 if bottom_img is not None:
                     img_msg = {"type": "image_update", "image": bottom_img.copy()}
                     self.message_queue.put(img_msg)
-            # Use a short sleep to prevent busy looping.
-            SHUTDOWN_EVENT.wait(timeout=0.1)
+            self.shutdown_event.wait(timeout=0.1)
 
     def _check_if_record_is_requested(self):
         if (
@@ -85,12 +88,10 @@ class DataCollectionCoordinator:
     def _process_messages(self):
         """
         Processes messages from the message queue.
-        Handles state transitions and image display.
-        Uses blocking get() on the queue (with timeout) to avoid tight polling.
         """
         prev_state = RobotActivity.STARTUP
         self.session_dir, self.task_dir, self.restore_dir = "", "", ""
-        while not SHUTDOWN_EVENT.is_set():
+        while not self.shutdown_event.is_set():
             try:
                 msg = self.message_queue.get(timeout=0.2)
             except Empty:
@@ -115,7 +116,7 @@ class DataCollectionCoordinator:
                 try:
                     cv2.imshow("Bottom Image", bottom_img)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
-                        SHUTDOWN_EVENT.set()
+                        self.shutdown_event.set()
                 except Exception as e:
                     logger.error("Error during image display: %s", e)
 
@@ -162,8 +163,10 @@ class DataCollectionCoordinator:
         if self.save_data:
             self.shared_state.recorder.start_new_recording(output_dir)
 
-    def _setup_recorder(self, output_dir: str) -> Recorder:
-        return Recorder(self.config, output_dir=output_dir)
+    def _setup_recorder(self, output_dir: str):
+        return Recorder(
+            self.config, output_dir=output_dir, shutdown_event=self.shutdown_event
+        )
 
     def _on_resetting_state(self):
         status = "fail" if self.autograsper.failed else "success"
@@ -180,7 +183,6 @@ class DataCollectionCoordinator:
             self.shared_state.recorder.stop()
             # Wait briefly for the recorder thread to finish.
             time.sleep(1)
-            # If using futures, its termination will be handled in shutdown.
 
     def run(self):
         """
@@ -190,27 +192,22 @@ class DataCollectionCoordinator:
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="Coord"
         ) as executor:
-            self.executor = (
-                executor  # Save a reference so we can submit recorder task later.
-            )
+            self.executor = executor  # Save reference for later submissions.
             # Submit the three primary tasks.
             futures = []
             futures.append(executor.submit(self.autograsper.run_grasping))
             futures.append(executor.submit(self._monitor_state))
             futures.append(executor.submit(self._process_messages))
 
-            # Wait for any task to complete exceptionally or for shutdown.
             try:
                 concurrent.futures.wait(
                     futures, return_when=concurrent.futures.FIRST_EXCEPTION
                 )
             except Exception as e:
                 logger.error("Exception in one of the coordinator tasks: %s", e)
-                SHUTDOWN_EVENT.set()
+                self.shutdown_event.set()
             finally:
-                # Ensure shutdown signal is set.
-                SHUTDOWN_EVENT.set()
-                # Wait for all tasks to finish.
+                self.shutdown_event.set()
                 for future in futures:
                     try:
                         future.result(timeout=5)

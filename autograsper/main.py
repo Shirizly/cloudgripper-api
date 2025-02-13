@@ -1,5 +1,6 @@
 import logging
 import sys
+import threading
 
 from coordinator import DataCollectionCoordinator
 from custom_graspers.example_grasper import ExampleGrasper
@@ -11,8 +12,9 @@ logger = logging.getLogger(__name__)
 
 def main():
     config = load_config("autograsper/config.yaml")
-    exampleGrasper = ExampleGrasper(config)
-    coordinator = DataCollectionCoordinator(config, exampleGrasper)
+    shutdown_event = threading.Event()
+    exampleGrasper = ExampleGrasper(config, shutdown_event)
+    coordinator = DataCollectionCoordinator(config, exampleGrasper, shutdown_event)
     coordinator.run()
 
 

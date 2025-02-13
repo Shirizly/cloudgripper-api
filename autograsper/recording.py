@@ -1,3 +1,4 @@
+# recording.py
 import os
 import sys
 import time
@@ -16,40 +17,33 @@ if project_root not in sys.path:
 from client.cloudgripper_client import GripperRobot
 from library.utils import convert_ndarray_to_list, get_undistorted_bottom_image
 
-logging.basicConfig(level=logging.INFO)
-
-SHUTDOWN_EVENT = threading.Event()
+logger = logging.getLogger(__name__)
 
 
 class Recorder:
     FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 
-    def __init__(self, config: Any, output_dir: str):
+    def __init__(self, config: Any, output_dir: str, shutdown_event: threading.Event):
+        self.shutdown_event = shutdown_event
         try:
-            self.camera_matrix = np.array(config["camera"]["m"])
-            self.distortion_coeffs = np.array(config["camera"]["d"])
+            camera_config = config["camera"]
+            experiment_config = config["experiment"]
+            self.camera_matrix = np.array(camera_config["m"])
+            self.distortion_coeffs = np.array(camera_config["d"])
             self.record_only_after_action = bool(
-                config["camera"]["record_only_after_action"]
+                camera_config["record_only_after_action"]
             )
-            self.robot_idx = config["experiment"]["robot_idx"]
-
-            self.robot_idx = config["experiment"]["robot_idx"]
-
-            self.save_data = bool(config["camera"]["record"])
-            self.FPS = int(config["camera"]["fps"])
-
-            self.record_only_after_action = bool(
-                config["camera"]["record_only_after_action"]
-            )
+            self.robot_idx = experiment_config["robot_idx"]
+            self.save_data = bool(camera_config["record"])
+            self.FPS = int(camera_config["fps"])
             self.save_images_individually = bool(
-                config["camera"]["save_images_individually"]
+                camera_config["save_images_individually"]
             )
-
-            self.clip_length = None
-            if "clip_length" in config["camera"]:
-                self.clip_length = config["camera"]["clip_length"]
-        except Exception as e:
-            raise ValueError("Recorder config.ini ERROR") from e
+            self.clip_length = camera_config.get("clip_length", None)
+        except KeyError as e:
+            raise ValueError(f"Missing configuration key in Recorder: {e}") from e
+        except TypeError as e:
+            raise ValueError(f"Invalid configuration format in Recorder: {e}") from e
 
         self.token = os.getenv("CLOUDGRIPPER_TOKEN")
         if not self.token:
@@ -123,7 +117,7 @@ class Recorder:
         """Record video or images. Note that image display is now handled by the coordinator."""
         self._prepare_new_recording()
         try:
-            while not self.stop_flag and not SHUTDOWN_EVENT.is_set():
+            while not self.stop_flag and not self.shutdown_event.is_set():
                 if not self.pause:
                     self._update()
                     if not self.ensure_images():
@@ -149,8 +143,8 @@ class Recorder:
                 else:
                     time.sleep(1 / self.FPS)
         except Exception as e:
-            logging.error("An error occurred in Recorder.record: %s", e)
-            SHUTDOWN_EVENT.set()
+            logger.error("An error occurred in Recorder.record: %s", e)
+            self.shutdown_event.set()
         finally:
             self._release_writers()
 
@@ -190,9 +184,9 @@ class Recorder:
                         self.video_writer_top.write(top_image)
                         self.video_writer_bottom.write(bottom_image)
                     else:
-                        logging.warning("Video writers not initialized.")
+                        logger.warning("Video writers not initialized.")
         except Exception as e:
-            logging.error("Error capturing frame: %s", e)
+            logger.error("Error capturing frame: %s", e)
         finally:
             with self.snapshot_cond:
                 if self.take_snapshot > 0:
@@ -221,7 +215,7 @@ class Recorder:
         self.output_dir = new_output_dir
         self._initialize_directories()
         self._prepare_new_recording()
-        logging.info("Started new recording in directory: %s", new_output_dir)
+        logger.info("Started new recording in directory: %s", new_output_dir)
 
     def _prepare_new_recording(self) -> None:
         self.stop_flag = False
@@ -230,7 +224,7 @@ class Recorder:
 
     def stop(self) -> None:
         self.stop_flag = True
-        logging.info("Stop flag set to True in Recorder")
+        logger.info("Stop flag set to True in Recorder")
 
     def save_state(self) -> None:
         try:
@@ -253,14 +247,14 @@ class Recorder:
             with open(state_file, "w") as file:
                 json.dump(data, file, indent=4)
         except Exception as e:
-            logging.error("Error saving state: %s", e)
+            logger.error("Error saving state: %s", e)
 
     def ensure_images(self) -> bool:
         with self.image_lock:
             if self.image_top is None or self.bottom_image is None:
                 self._update()
             if self.image_top is None or self.bottom_image is None:
-                logging.error(
+                logger.error(
                     "ensure_images: Failed to obtain valid images from the robot after update."
                 )
                 return False

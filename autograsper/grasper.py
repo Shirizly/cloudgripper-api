@@ -1,3 +1,4 @@
+# grasper.py
 from abc import ABC, abstractmethod
 import os
 import sys
@@ -15,7 +16,6 @@ if project_root not in sys.path:
 
 from client.cloudgripper_client import GripperRobot
 from library.utils import get_undistorted_bottom_image, OrderType, execute_order
-from recording import SHUTDOWN_EVENT
 
 load_dotenv()
 
@@ -27,17 +27,23 @@ class RobotActivity(Enum):
     STARTUP = 4
 
 
-def sleep_with_shutdown(duration: float):
+def sleep_with_shutdown(duration: float, shutdown_event: threading.Event):
     """Sleep in small increments, checking for shutdown."""
     end_time = time.time() + duration
     while time.time() < end_time:
-        if SHUTDOWN_EVENT.is_set():
+        if shutdown_event.is_set():
             break
         time.sleep(0.05)
 
 
 class AutograsperBase(ABC):
-    def __init__(self, config, output_dir: str = ""):
+    def __init__(
+        self, config, output_dir: str = "", shutdown_event: threading.Event = None
+    ):
+        if shutdown_event is None:
+            raise ValueError("shutdown_event must be provided")
+        self.shutdown_event = shutdown_event
+
         self.token = os.getenv("CLOUDGRIPPER_TOKEN")
         if not self.token:
             raise ValueError("CLOUDGRIPPER_TOKEN environment variable not set")
@@ -57,15 +63,23 @@ class AutograsperBase(ABC):
         self.robot_state = None
 
         try:
-            self.camera_matrix = np.array(config["camera"]["m"])
-            self.distortion_coeffs = np.array(config["camera"]["d"])
+            camera_config = config["camera"]
+            experiment_config = config["experiment"]
+            self.camera_matrix = np.array(camera_config["m"])
+            self.distortion_coeffs = np.array(camera_config["d"])
             self.record_only_after_action = bool(
-                config["camera"]["record_only_after_action"]
+                camera_config["record_only_after_action"]
             )
-            self.robot_idx = config["experiment"]["robot_idx"]
-            self.time_between_orders = config["experiment"]["time_between_orders"]
-        except Exception as e:
-            raise ValueError("Grasper config.yaml ERROR: ", e) from e
+            self.robot_idx = experiment_config["robot_idx"]
+            self.time_between_orders = experiment_config["time_between_orders"]
+        except KeyError as e:
+            raise ValueError(
+                f"Missing configuration key in AutograsperBase: {e}"
+            ) from e
+        except TypeError as e:
+            raise ValueError(
+                f"Invalid configuration format in AutograsperBase: {e}"
+            ) from e
 
         self.robot = self.initialize_robot(self.robot_idx, self.token)
         self.bottom_image = get_undistorted_bottom_image(
@@ -82,21 +96,20 @@ class AutograsperBase(ABC):
         """Request a state record and wait until it is processed or shutdown is signaled."""
         self.request_state_record = True
         self.state_recorded_event.clear()  # Clear any previous signal.
-        while not SHUTDOWN_EVENT.is_set():
+        while not self.shutdown_event.is_set():
             if self.state_recorded_event.wait(timeout=0.1):
                 return
-        # If shutdown is set, return immediately.
         return
 
     def wait_for_start_signal(self):
         """Wait for the start event, but check periodically for shutdown."""
-        while not SHUTDOWN_EVENT.is_set():
+        while not self.shutdown_event.is_set():
             if self.start_event.wait(timeout=0.1):
                 return
         return
 
     def run_grasping(self):
-        while self.state != RobotActivity.FINISHED and not SHUTDOWN_EVENT.is_set():
+        while self.state != RobotActivity.FINISHED and not self.shutdown_event.is_set():
             self.startup()
             self.state = RobotActivity.ACTIVE
             self.wait_for_start_signal()
@@ -106,13 +119,13 @@ class AutograsperBase(ABC):
             except Exception as e:
                 print(f"Unexpected error during perform_task: {e}")
                 self.failed = True
-                SHUTDOWN_EVENT.set()
+                self.shutdown_event.set()
                 raise
-            if self.state == RobotActivity.FINISHED or SHUTDOWN_EVENT.is_set():
+            if self.state == RobotActivity.FINISHED or self.shutdown_event.is_set():
                 break
-            sleep_with_shutdown(self.task_time_margin)
+            sleep_with_shutdown(self.task_time_margin, self.shutdown_event)
             self.state = RobotActivity.RESETTING
-            sleep_with_shutdown(self.task_time_margin)
+            sleep_with_shutdown(self.task_time_margin, self.shutdown_event)
             if self.failed:
                 print("Experiment failed, recovering")
                 self.recover_after_fail()
@@ -127,11 +140,11 @@ class AutograsperBase(ABC):
     @abstractmethod
     def perform_task(self):
         # Default implementation; override this in your subclass.
-        while not SHUTDOWN_EVENT.is_set():
+        while not self.shutdown_event.is_set():
             print(
                 "GRASPER: No task defined. Override perform_task() to perform robot actions."
             )
-            sleep_with_shutdown(0.5)
+            sleep_with_shutdown(0.5, self.shutdown_event)
         print("GRASPER: Exiting perform_task() due to shutdown signal.")
 
     def reset_task(self):
@@ -153,10 +166,10 @@ class AutograsperBase(ABC):
         Queue a list of orders for the robot to execute sequentially and save state after each order.
         """
         for order in order_list:
-            if SHUTDOWN_EVENT.is_set():
+            if self.shutdown_event.is_set():
                 break
             execute_order(self.robot, order, output_dir, reverse_xy)
-            sleep_with_shutdown(time_between_orders)
+            sleep_with_shutdown(time_between_orders, self.shutdown_event)
             if (
                 record
                 and self.record_only_after_action

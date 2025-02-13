@@ -1,13 +1,14 @@
-from grasper import AutograsperBase, RobotActivity
+from grasper import AutograsperBase
 from library.utils import OrderType
-import time
 
 
 class ExampleGrasper(AutograsperBase):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, shutdown_event):
+        super().__init__(config, shutdown_event=shutdown_event)
 
     def perform_task(self):
+
+
         self.queue_orders(
             [
                 (OrderType.MOVE_XY, [0.9, 0.9]),
@@ -19,7 +20,7 @@ class ExampleGrasper(AutograsperBase):
             time_between_orders=self.time_between_orders,  # set in config.ini file
         )
 
-        self.state = RobotActivity.FINISHED  # stop data recording
+        # self.state = RobotActivity.FINISHED  # stop data recording
 
     def startup(self):
         # This method will execute at the beginning of every experiment.
@@ -29,10 +30,8 @@ class ExampleGrasper(AutograsperBase):
 
         self.queue_orders(
             [
-                (OrderType.MOVE_XY, [0.1, 0.1]),
-                (OrderType.ROTATE, [0]),
                 (OrderType.MOVE_Z, [1]),
-                (OrderType.GRIPPER_CLOSE, []),
+                (OrderType.MOVE_XY, [0.1, 0.1]),
             ],
             time_between_orders=self.time_between_orders,  # set in config.ini file
         )
