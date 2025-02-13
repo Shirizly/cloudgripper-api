@@ -20,6 +20,9 @@ from library.utils import convert_ndarray_to_list, get_undistorted_bottom_image
 
 logging.basicConfig(level=logging.INFO)
 
+SHUTDOWN_EVENT = threading.Event()
+
+
 
 class Recorder:
     FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
@@ -64,9 +67,11 @@ class Recorder:
         # For when record_only_after_action is True.
         self.take_snapshot = 0
 
-        # Locks for thread-safe access.
-        self.image_lock = threading.Lock()
-        self.writer_lock = threading.Lock()
+        # Use reentrant locks for nested locking.
+        self.image_lock = threading.RLock()
+        self.writer_lock = threading.RLock()
+        # Condition variable to synchronize snapshot requests.
+        self.snapshot_cond = threading.Condition(threading.RLock())
 
         # State and writer variables.
         self.stop_flag = False
@@ -120,7 +125,7 @@ class Recorder:
         """Record video or images. Note that image display is now handled by the coordinator."""
         self._prepare_new_recording()
         try:
-            while not self.stop_flag:
+            while not self.stop_flag and not SHUTDOWN_EVENT.is_set():
                 if not self.pause:
                     self._update()
                     if not self.ensure_images():
@@ -141,14 +146,13 @@ class Recorder:
                         if self.save_data:
                             self.save_state()
                         self.frame_counter += 1
-                        if self.take_snapshot > 0:
-                            self.take_snapshot -= 1
                     else:
                         time.sleep(1 / self.FPS)
                 else:
                     time.sleep(1 / self.FPS)
         except Exception as e:
-            logging.error("An error occurred: %s", e)
+            logging.error("An error occurred in Recorder.record: %s", e)
+            SHUTDOWN_EVENT.set()
         finally:
             self._release_writers()
 
@@ -191,6 +195,12 @@ class Recorder:
                         logging.warning("Video writers not initialized.")
         except Exception as e:
             logging.error("Error capturing frame: %s", e)
+        finally:
+            with self.snapshot_cond:
+                if self.take_snapshot > 0:
+                    self.take_snapshot -= 1
+                    if self.take_snapshot == 0:
+                        self.snapshot_cond.notify_all()
 
     def _start_or_restart_video_writers(self) -> None:
         if not self.save_images_individually:
@@ -222,7 +232,7 @@ class Recorder:
 
     def stop(self) -> None:
         self.stop_flag = True
-        logging.info("Stop flag set to True")
+        logging.info("Stop flag set to True in Recorder")
 
     def save_state(self) -> None:
         try:

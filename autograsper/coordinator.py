@@ -4,44 +4,39 @@ import threading
 import time
 import traceback
 import ast
+import numpy as np
 import cv2
 from dataclasses import dataclass
 from typing import Optional
 from queue import Queue, Empty
 
-# -------------
 from grasper import RobotActivity, AutograsperBase
-from recording import Recorder
+from recording import Recorder, SHUTDOWN_EVENT
 from library.utils import parse_config
 
 logger = logging.getLogger(__name__)
 
-# Global event for error handling across threads
-ERROR_EVENT = threading.Event()
-
+# Use SHUTDOWN_EVENT as our dedicated shutdown signal.
 
 @dataclass
 class SharedState:
     """
     Holds shared references between threads.
     """
-
     state: str = RobotActivity.STARTUP
     recorder: Optional[Recorder] = None
     recorder_thread: Optional[threading.Thread] = None
-
 
 class DataCollectionCoordinator:
     """
     Orchestrates the autograsper, manages recording,
     and coordinates state changes and image updates via a centralized message queue.
     """
-
     def __init__(self, config_file, grasper: AutograsperBase):
         self._load_config(config_file)
         self.shared_state = SharedState()
         self.autograsper = grasper
-        # Initialize a message queue for centralized communication.
+        # Dedicated message queue for inter-thread communication.
         self.message_queue = Queue()
 
     def run(self):
@@ -49,7 +44,6 @@ class DataCollectionCoordinator:
         Main controller entry point: starts threads, processes messages from the queue,
         and safely displays the bottom image.
         """
-        # Start the autograsper and monitor threads.
         self.autograsper_thread = threading.Thread(
             target=self.autograsper.run_grasping, name="AutograsperThread"
         )
@@ -73,9 +67,7 @@ class DataCollectionCoordinator:
             experiment_cfg = self.config["experiment"]
             camera_cfg = self.config["camera"]
             self.experiment_name = ast.literal_eval(experiment_cfg["name"])
-            self.timeout_between_experiments = ast.literal_eval(
-                experiment_cfg["timeout_between_experiments"]
-            )
+            self.timeout_between_experiments = ast.literal_eval(experiment_cfg["timeout_between_experiments"])
             self.save_data = bool(ast.literal_eval(camera_cfg["record"]))
         except Exception as e:
             raise ValueError("ERROR reading from config.ini: ", e)
@@ -85,32 +77,26 @@ class DataCollectionCoordinator:
         Monitor thread: polls the autograsper and recorder for updates,
         and posts messages to the centralized message queue.
         """
-        while not ERROR_EVENT.is_set():
-            # Create a state update message.
+        while not SHUTDOWN_EVENT.is_set():
             state_msg = {"type": "state_update", "state": self.autograsper.state}
             self.message_queue.put(state_msg)
 
             self._check_if_record_is_requested()
 
-            # If a recorder is available, post an image update message.
             if self.shared_state.recorder is not None:
                 bottom_img = self.shared_state.recorder.bottom_image
                 if bottom_img is not None:
-                    # Copy the image to avoid concurrent modifications.
                     img_msg = {"type": "image_update", "image": bottom_img.copy()}
                     self.message_queue.put(img_msg)
             time.sleep(0.1)
 
     def _check_if_record_is_requested(self):
-        if (
-            self.autograsper.request_state_record
-            and self.shared_state.recorder is not None
-        ):
-            self.shared_state.recorder.take_snapshot += 1
-            while self.shared_state.recorder.take_snapshot > 0:
-                time.sleep(0.1)
+        if (self.autograsper.request_state_record and self.shared_state.recorder is not None):
+            with self.shared_state.recorder.snapshot_cond:
+                self.shared_state.recorder.take_snapshot += 1
+                while self.shared_state.recorder.take_snapshot > 0:
+                    self.shared_state.recorder.snapshot_cond.wait(timeout=0.1)
             self.autograsper.request_state_record = False
-            # Signal to the autograsper that the record request has been processed.
             self.autograsper.state_recorded_event.set()
 
     def _handle_state_changes(self):
@@ -120,7 +106,7 @@ class DataCollectionCoordinator:
         """
         prev_state = RobotActivity.STARTUP
         self.session_dir, self.task_dir, self.restore_dir = "", "", ""
-        while not ERROR_EVENT.is_set():
+        while not SHUTDOWN_EVENT.is_set():
             try:
                 msg = self.message_queue.get(timeout=0.1)
             except Empty:
@@ -145,17 +131,14 @@ class DataCollectionCoordinator:
                 bottom_img = msg["image"]
                 try:
                     cv2.imshow("Bottom Image", bottom_img)
-                    if cv2.waitKey(1):
-                        ERROR_EVENT.set()
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        SHUTDOWN_EVENT.set()
                 except Exception as e:
                     logger.error("Error during image display: %s", e)
 
             self.message_queue.task_done()
 
     def _on_state_transition(self, old_state, new_state):
-        """
-        Optional hook for additional logic during state transitions.
-        """
         if new_state == RobotActivity.STARTUP and old_state != RobotActivity.STARTUP:
             if self.shared_state.recorder:
                 self.shared_state.recorder.pause = True
@@ -163,9 +146,6 @@ class DataCollectionCoordinator:
                 self.shared_state.recorder.pause = False
 
     def _create_new_data_point(self):
-        """
-        Creates a new session folder with 'task' and 'restore' subfolders.
-        """
         base_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "recorded_data",
@@ -182,21 +162,13 @@ class DataCollectionCoordinator:
         os.makedirs(self.restore_dir, exist_ok=True)
 
     def _on_active_state(self):
-        """
-        Actions to perform when transitioning to ACTIVE.
-        Signals the autograsper to start its task.
-        """
         if self.save_data:
             self.autograsper.output_dir = self.task_dir
         self._ensure_recorder_running(self.task_dir)
         time.sleep(0.5)
-        # Signal the autograsper to begin by setting its event.
         self.autograsper.start_event.set()
 
     def _ensure_recorder_running(self, output_dir: str):
-        """
-        Ensures the recorder is created and running.
-        """
         if not self.shared_state.recorder:
             self.shared_state.recorder = self._setup_recorder(output_dir)
             self.shared_state.recorder_thread = threading.Thread(
@@ -207,15 +179,9 @@ class DataCollectionCoordinator:
             self.shared_state.recorder.start_new_recording(output_dir)
 
     def _setup_recorder(self, output_dir: str) -> Recorder:
-        """
-        Initializes and returns a Recorder instance based on config.
-        """
         return Recorder(self.config, output_dir=output_dir)
 
     def _on_resetting_state(self):
-        """
-        Actions when the robot transitions into RESETTING.
-        """
         status = "fail" if self.autograsper.failed else "success"
         logger.info(f"Task result: {status}")
         if self.save_data:
@@ -226,32 +192,20 @@ class DataCollectionCoordinator:
                 self.shared_state.recorder.start_new_recording(self.restore_dir)
 
     def _on_finished_state(self):
-        """
-        Actions when the robot transitions to FINISHED.
-        """
         if self.shared_state.recorder:
             self.shared_state.recorder.stop()
             time.sleep(1)
-            if (
-                self.shared_state.recorder_thread
-                and self.shared_state.recorder_thread.is_alive()
-            ):
+            if (self.shared_state.recorder_thread and self.shared_state.recorder_thread.is_alive()):
                 self.shared_state.recorder_thread.join()
 
     def _cleanup(self):
-        """
-        Sets the global error event and joins the main threads.
-        """
-        ERROR_EVENT.set()
+        SHUTDOWN_EVENT.set()
         if self.autograsper_thread and self.autograsper_thread.is_alive():
             self.autograsper_thread.join()
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join()
 
     def _handle_error(self, exception: Exception) -> None:
-        """
-        Logs exception info and sets the error event.
-        """
         logger.error(f"Error occurred: {exception}")
         logger.error(traceback.format_exc())
-        ERROR_EVENT.set()
+        SHUTDOWN_EVENT.set()
