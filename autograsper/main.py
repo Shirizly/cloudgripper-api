@@ -1,4 +1,3 @@
-# main.py
 import threading
 import cv2
 import logging
