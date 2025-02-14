@@ -97,7 +97,7 @@ class AutograsperBase(ABC):
     def wait_for_start_signal(self):
         """Wait for the start event, checking periodically for shutdown."""
         while not self.shutdown_event.is_set():
-            if self.start_event.wait(timeout=0.1):
+            if self.start_event.wait(timeout=0.05):
                 return
 
     def run_grasping(self):
