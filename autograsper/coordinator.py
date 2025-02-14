@@ -83,7 +83,7 @@ class DataCollectionCoordinator:
             with self.shared_state.recorder.snapshot_cond:
                 self.shared_state.recorder.take_snapshot += 1
                 while self.shared_state.recorder.take_snapshot > 0:
-                    self.shared_state.recorder.snapshot_cond.wait(timeout=0.1)
+                    self.shared_state.recorder.snapshot_cond.wait(timeout=1.0)
             self.autograsper.request_state_record = False
             self.autograsper.state_recorded_event.set()
 
