@@ -6,9 +6,6 @@
 		"dockerfile": "Dockerfile"
 	},
 
-	// 1. Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": []
-
 	// 2. Use 'mounts' to make a list of local directories available inside the container. More info: https://code.visualstudio.com/remote/advancedcontainers/add-local-file-mount
 	// "mounts": [],
 
@@ -16,18 +13,9 @@
 	// run the container with all GPUs
 	"runArgs": [
 		"--gpus",
-		"all"
+		"all",
+	"--network=host"
 	],
-
-
-	"mounts": [
-    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
-	],
-	"containerEnv": {
-		"DISPLAY": "${localEnv:DISPLAY}"
-	},
-
-
 
 
 	// 4. Features to add to the Dev Container. More info: https://containers.dev/implementors/features.
@@ -59,7 +47,10 @@
 			// Set *default* container specific settings.json values on container create.
 			"settings": {
 				"python.defaultInterpreterPath": "/opt/conda/bin/python"
-			}
+			},
+			"extensions": [
+				"charliermarsh.ruff"
+			]
 		}
 	},
 	
@@ -79,7 +70,7 @@
 
 	// 10. Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "pip3 install --user -r requirements.txt"
-	"postCreateCommand": "sudo apt-get update && sudo apt-get install ffmpeg libsm6 libxext6  -y && pip install opencv-python"
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install ffmpeg libsm6 libxext6  -y && pip install -r requirements.txt"
 
 	// 11. Use 'postStartCommand' to run a command each time the container starts successfully.
 	// "postStartCommand": "",
