@@ -47,3 +47,5 @@ scratch.py
 setup.py
 visualize.py
 visualize_video.py
+finetune.py
+real_eval.py
