@@ -8,6 +8,7 @@ from flask import Flask, Response
 
 from coordinator import DataCollectionCoordinator
 from custom_graspers.example_grasper import ExampleGrasper
+from custom_graspers.evaluation_grasper import EvalGrasper
 from utils import load_config
 
 
@@ -60,7 +61,7 @@ def main():
     config = load_config("autograsper/config.yaml")
     shutdown_event = threading.Event()
 
-    grasper = ExampleGrasper(config, shutdown_event=shutdown_event)
+    grasper = EvalGrasper(config, shutdown_event=shutdown_event)
     global_coordinator = DataCollectionCoordinator(config, grasper, shutdown_event)
     global_coordinator.start()
 

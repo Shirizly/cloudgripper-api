@@ -73,6 +73,8 @@ class DataCollectionCoordinator:
                 if bottom_img is not None:
                     ui_msg = {"type": "image_update", "image": bottom_img.copy()}
                     self.ui_queue.put(ui_msg)
+                    # TODO make this safe against race conditions
+                    self.autograsper.bottom_image = bottom_img.copy()
             self.shutdown_event.wait(timeout=0.1)
 
     def _check_if_record_is_requested(self):
