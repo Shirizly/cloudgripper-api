@@ -1,0 +1,6 @@
+moviepy
+opencv-python
+debugpy
+matplotlib
+seaborn
+scipy

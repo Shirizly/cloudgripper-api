@@ -1,36 +1,29 @@
-FROM continuumio/miniconda3
+# Use an appropriate base image.
+FROM python:3.12
 
-# RUN sudo apt-get update && sudo apt-get install -y \
-#     libx11-xcb1 \
-#     libxrender1 \
-#     libxcb-render0 \
-#     libxcb-shm0 \
-#     libxcb1 \
-#     libxext6 \
-#     libsm6 \
-#     libglib2.0-0
+# Install common development tools.
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    vim \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    && rm -rf /var/lib/apt/lists/*
 
-ARG HOME=/root
-ARG CTAGS_DIR=$HOME/tools/ctags
-ARG RIPGREP_DIR=$HOME/tools/ripgrep
-ARG ANACONDA_DIR=$HOME/tools/anaconda
-ARG NVIM_CONFIG_DIR=$HOME/.config/nvim
+RUN curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz && \
+                rm -rf /opt/nvim && \
+                tar -C /opt -xzf nvim-linux-x86_64.tar.gz
 
-ENV TZ=US \
-    DEBIAN_FRONTEND=noninteractive
+# Set a default working directory.
+WORKDIR /workspace
 
-# Install common dev tools
-RUN apt-get update --allow-unauthenticated \
-    && apt-get install --allow-unauthenticated -y git curl autoconf pkg-config zsh locales neovim
+RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/v1.2.1/zsh-in-docker.sh)"
 
-# python packages
-RUN pip install pynvim jedi pylint flake8
+COPY requirements.txt requirements.txt
+RUN pip install -r requirements.txt
 
-# Install ripgrep
-RUN curl -Lo /tmp/ripgrep.tar.gz https://github.com/BurntSushi/ripgrep/releases/download/11.0.0/ripgrep-11.0.0-x86_64-unknown-linux-musl.tar.gz \
-    && cd /tmp \
-    && mkdir -p ${RIPGREP_DIR} \
-    && tar zxf ripgrep.tar.gz -C ${RIPGREP_DIR} --strip-components=1 \
-    && rm -rf /tmp/ripgrep.tar.gz
-ENV PATH=${RIPGREP_DIR}:$PATH
 
+ RUN echo 'export PATH="$PATH:/opt/nvim-linux-x86_64/bin"' >> /root/.bashrc
+
+CMD ["bash"]
