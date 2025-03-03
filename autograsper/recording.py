@@ -1,9 +1,8 @@
 import os
 import sys
-import time
 import json
 import logging
-from typing import Any, Tuple, List, Dict
+from typing import Any, Tuple, List, Dict, Optional
 import cv2
 import numpy as np
 import threading
@@ -25,6 +24,7 @@ class Recorder:
 
     def __init__(self, config: Any, output_dir: str, shutdown_event: threading.Event):
         self.shutdown_event = shutdown_event
+
         try:
             camera_config = config["camera"]
             experiment_config = config["experiment"]
@@ -52,14 +52,14 @@ class Recorder:
         self.output_dir = output_dir
         self.robot = GripperRobot(self.robot_idx, self.token)
 
-        self.image_top = None
-        self.bottom_image = None
+        self.image_top: Optional[np.ndarray] = None
+        self.bottom_image: Optional[np.ndarray] = None
         self.pause = False
 
         # For when record_only_after_action is True.
         self.take_snapshot = 0
 
-        # Use reentrant locks for nested locking.
+        # Reentrant locks for nested locking.
         self.image_lock = threading.RLock()
         self.writer_lock = threading.RLock()
         # Condition variable to synchronize snapshot requests.
@@ -69,8 +69,8 @@ class Recorder:
         self.stop_flag = False
         self.frame_counter = 0
         self.video_counter = 0
-        self.video_writer_top = None
-        self.video_writer_bottom = None
+        self.video_writer_top: Optional[cv2.VideoWriter] = None
+        self.video_writer_bottom: Optional[cv2.VideoWriter] = None
 
         self._initialize_directories()
 
@@ -84,7 +84,9 @@ class Recorder:
                 FileManager.create_video_dirs(self.output_dir)
             )
 
-    def _start_new_video(self) -> Tuple[cv2.VideoWriter, cv2.VideoWriter]:
+    def _start_new_video(
+        self,
+    ) -> Tuple[Optional[cv2.VideoWriter], Optional[cv2.VideoWriter]]:
         if not self.ensure_images():
             return None, None
 
@@ -107,13 +109,15 @@ class Recorder:
         return video_writer_top, video_writer_bottom
 
     def record(self) -> None:
-        """Record video or images. Image display is handled by the coordinator UI."""
+        """Record video or images. Image display is handled externally."""
         self._prepare_new_recording()
         try:
             while not self.stop_flag and not self.shutdown_event.is_set():
                 if not self.pause:
                     self._update()
                     if not self.ensure_images():
+                        # Wait briefly for images to become available.
+                        self.shutdown_event.wait(1 / self.FPS)
                         continue
 
                     if (not self.record_only_after_action) or (self.take_snapshot > 0):
@@ -127,31 +131,38 @@ class Recorder:
                         ):
                             self.video_counter += 1
                             self._start_or_restart_video_writers()
-                        time.sleep(1 / self.FPS)
+                        # Use shutdown_event.wait to allow prompt shutdown.
+                        self.shutdown_event.wait(1 / self.FPS)
                         if self.save_data:
                             self.save_state()
                         self.frame_counter += 1
                     else:
-                        time.sleep(1 / self.FPS)
+                        self.shutdown_event.wait(1 / self.FPS)
                 else:
-                    time.sleep(1 / self.FPS)
+                    self.shutdown_event.wait(1 / self.FPS)
         except Exception as e:
-            logger.error("An error occurred in Recorder.record: %s", e)
+            logger.exception("An error occurred in Recorder.record:", e)
             self.shutdown_event.set()
         finally:
             self._release_writers()
 
     def _update(self) -> None:
-        data = self.robot.get_all_states()
-        with self.image_lock:
-            self.image_top = data[0]
-            self.bottom_image = get_undistorted_bottom_image(
-                self.robot, self.camera_matrix, self.distortion_coeffs
-            )
-        self.state = data[2]
-        self.timestamp = data[3]
+        """Update image and state data from the robot."""
+        try:
+            data = self.robot.get_all_states()
+            with self.image_lock:
+                self.image_top = data[0]
+                self.bottom_image = get_undistorted_bottom_image(
+                    self.robot, self.camera_matrix, self.distortion_coeffs
+                )
+            self.state = data[2]
+            self.timestamp = data[3]
+        except Exception as e:
+            logger.exception("Error updating images/state:", e)
+            raise
 
     def _capture_frame(self) -> None:
+        """Capture and save the current frame as an image or add it to the video writer."""
         try:
             if not self.ensure_images():
                 return
@@ -159,15 +170,7 @@ class Recorder:
                 top_image = self.image_top.copy()
                 bottom_image = self.bottom_image.copy()
             if self.save_images_individually:
-                top_filename = os.path.join(
-                    self.output_images_dir, f"image_top_{self.frame_counter}.jpeg"
-                )
-                bottom_filename = os.path.join(
-                    self.output_bottom_images_dir,
-                    f"image_bottom_{self.frame_counter}.jpeg",
-                )
-                cv2.imwrite(top_filename, top_image)
-                cv2.imwrite(bottom_filename, bottom_image)
+                self._save_individual_images(top_image, bottom_image)
             else:
                 with self.writer_lock:
                     if (
@@ -179,7 +182,7 @@ class Recorder:
                     else:
                         logger.warning("Video writers not initialized.")
         except Exception as e:
-            logger.error("Error capturing frame: %s", e)
+            logger.exception("Error capturing frame:", e)
         finally:
             with self.snapshot_cond:
                 if self.take_snapshot > 0:
@@ -187,7 +190,24 @@ class Recorder:
                     if self.take_snapshot == 0:
                         self.snapshot_cond.notify_all()
 
+    def _save_individual_images(
+        self, top_image: np.ndarray, bottom_image: np.ndarray
+    ) -> None:
+        """Save the top and bottom images as individual JPEG files."""
+        try:
+            top_filename = os.path.join(
+                self.output_images_dir, f"image_top_{self.frame_counter}.jpeg"
+            )
+            bottom_filename = os.path.join(
+                self.output_bottom_images_dir, f"image_bottom_{self.frame_counter}.jpeg"
+            )
+            cv2.imwrite(top_filename, top_image)
+            cv2.imwrite(bottom_filename, bottom_image)
+        except Exception as e:
+            logger.exception("Error saving individual images:", e)
+
     def _start_or_restart_video_writers(self) -> None:
+        """Restart the video writers if not saving images individually."""
         if not self.save_images_individually:
             with self.writer_lock:
                 self._release_writers()
@@ -196,6 +216,7 @@ class Recorder:
                 )
 
     def _release_writers(self) -> None:
+        """Release the video writers if they have been initialized."""
         with self.writer_lock:
             if self.video_writer_top:
                 self.video_writer_top.release()
@@ -205,21 +226,25 @@ class Recorder:
                 self.video_writer_bottom = None
 
     def start_new_recording(self, new_output_dir: str) -> None:
+        """Start a new recording session in the specified directory."""
         self.output_dir = new_output_dir
         self._initialize_directories()
         self._prepare_new_recording()
         logger.info("Started new recording in directory: %s", new_output_dir)
 
     def _prepare_new_recording(self) -> None:
+        """Prepare for a new recording session."""
         self.stop_flag = False
         if not self.save_images_individually:
             self._start_or_restart_video_writers()
 
     def stop(self) -> None:
+        """Stop the recorder."""
         self.stop_flag = True
         logger.info("Stop flag set to True in Recorder")
 
     def save_state(self) -> None:
+        """Save the current state to a JSON file."""
         try:
             state = self.state.copy() if isinstance(self.state, dict) else self.state
             timestamp = self.timestamp
@@ -237,9 +262,10 @@ class Recorder:
             with open(state_file, "w") as file:
                 json.dump(data, file, indent=4)
         except Exception as e:
-            logger.error("Error saving state: %s", e)
+            logger.exception("Error saving state:", e)
 
     def ensure_images(self) -> bool:
+        """Ensure that valid images are available. Try updating if not."""
         with self.image_lock:
             if self.image_top is None or self.bottom_image is None:
                 self._update()

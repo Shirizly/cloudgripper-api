@@ -20,13 +20,15 @@ app = Flask(__name__)
 # Global reference to the coordinator (set in main()).
 global_coordinator = None
 
-@app.route('/video_feed')
+
+@app.route("/video_feed")
 def video_feed():
     """
     Route that streams the video feed as an MJPEG stream.
     """
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(
+        generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 def generate_frames():
@@ -40,11 +42,13 @@ def generate_frames():
             frame = ui_msg.get("image")
             if frame is not None:
                 # Encode frame as JPEG.
-                ret, jpeg = cv2.imencode('.jpg', frame)
+                ret, jpeg = cv2.imencode(".jpg", frame)
                 if ret:
                     frame_bytes = jpeg.tobytes()
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n\r\n')
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n\r\n"
+                    )
         else:
             # If no frame is available, sleep briefly.
             time.sleep(0.05)
@@ -53,7 +57,7 @@ def generate_frames():
 def main():
     global global_coordinator
 
-    config = load_config('autograsper/config.yaml')
+    config = load_config("autograsper/config.yaml")
     shutdown_event = threading.Event()
 
     grasper = ExampleGrasper(config, shutdown_event=shutdown_event)
@@ -62,7 +66,7 @@ def main():
 
     try:
         # Run the Flask app; it will listen on all interfaces (0.0.0.0) at port 5000.
-        app.run(host='0.0.0.0', port=3000, debug=False, threaded=True)
+        app.run(host="0.0.0.0", port=3000, debug=False, threaded=True)
     except Exception as e:
         logging.error("Flask app error: %s", e)
     finally:
@@ -72,5 +76,5 @@ def main():
         sys.exit(0)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
