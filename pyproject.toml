@@ -1,0 +1,43 @@
+[project]
+name = "cloudgripper-api"
+requires-python = "== 3.9.*"
+version = "0.1.0"
+dependencies = [
+    "cloudpickle==2.0.0",
+    "cmake==3.22.1",
+    "dm-control==1.0.10",
+    "dm-env==1.6",
+    "dm-tree==0.1.8",
+    "grad-cam>=1.5.4",
+    "gym==0.23.1",
+    "huggingface-hub==0.12.1",
+    "hydra-core==1.2.0",
+    "hydra-ray-launcher==1.2.0",
+    "hydra-submitit-launcher==1.2.0",
+    "imageio==2.22.1",
+    "imageio-ffmpeg==0.4.7",
+    "mujoco==2.3.2",
+    "numpy==1.26.4",
+    "opencv-python>=4.11.0.86",
+    "pandas>=2.2.3",
+    "plotly>=6.0.1",
+    "pynput>=1.8.1",
+    "pytest==7.3.1",
+    "python-dotenv>=1.0.1",
+    "r3m",
+    "robobuf",
+    "scipy>=1.13.1",
+    "timm==0.4.12",
+    "torch==2.0.0+cu117",
+    "torchvision==0.15.1+cu117",
+    "tqdm>=4.67.1",
+    "transforms3d>=0.4.2",
+    "wandb==0.13.4",
+]
+
+[tool.uv.sources]
+robobuf = { git = "https://github.com/AGI-Labs/robobuf.git" }
+r3m = { git = "https://github.com/facebookresearch/r3m.git" }
+
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu117"
