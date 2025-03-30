@@ -8,6 +8,7 @@ dependencies = [
     "dm-control==1.0.10",
     "dm-env==1.6",
     "dm-tree==0.1.8",
+    "flask>=3.1.0",
     "grad-cam>=1.5.4",
     "gym==0.23.1",
     "huggingface-hub==0.12.1",
