@@ -5,13 +5,13 @@ camera:
     - [0.0, 0.0, 1.0]
   d: [-0.07727407195057368, -0.047989733519315944, 0.12157420705123315, -0.09667542135039282]
   record: true
-  fps: 3
-  record_only_after_action: true
+  fps: 2.5
+  record_only_after_action: False
   save_images_individually: true
   # clip_length: 300
 
 experiment:
-  name: "my_experiment"
+  name: "subtask_1_random"
   robot_idx: "robot23"
   timeout_between_experiments: 2.0
-  time_between_orders: 2.0
+  time_between_orders: 2.5

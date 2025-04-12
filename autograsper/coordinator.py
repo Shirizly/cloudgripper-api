@@ -75,6 +75,7 @@ class DataCollectionCoordinator:
                     self.ui_queue.put(ui_msg)
                     # TODO make this safe against race conditions
                     self.autograsper.bottom_image = bottom_img.copy()
+                    self.autograsper.robot_state = self.shared_state.recorder.state
             self.shutdown_event.wait(timeout=0.1)
 
     def _check_if_record_is_requested(self):

@@ -22,6 +22,9 @@ def load_color_ranges(config_file="library/color_config.ini"):
     Returns:
         dict: A dictionary with color ranges.
     """
+    print(os.getcwd())
+    config_file = os.path.join(os.getcwd(), config_file)
+    f = open(config_file)
     config = configparser.ConfigParser()
     config.read(config_file)
 
