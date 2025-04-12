@@ -13,38 +13,48 @@ class EvalGrasper(AutograsperBase):
     def __init__(self, config, shutdown_event):
         super().__init__(config, shutdown_event=shutdown_event)
 
+        self.policy_path = os.path.join(
+            os.getcwd(), "eval_bash/Staged_learning/stage_1_100.sh"
+        )
+
+        if os.path.isfile(self.policy_path):
+            print("found")
+        else:
+            print("not found")
+
     def perform_policy_action(self):
         # Read the JSON to retrieve the proposed actions
-        json_file_path = "/workspaces/cloudgripper-api/proposed_action.json"
-        if not os.path.exists(json_file_path):
+        action_path = "/workspaces/cloudgripper-api/proposed_action.json"
+        if not os.path.exists(action_path):
             print(
-                f"No proposed action file found at {json_file_path}. No actions to perform."
+                f"No proposed action file found at {action_path}. No actions to perform."
             )
             return
 
-        with open(json_file_path, "r") as f:
+        with open(action_path, "r") as f:
             data = json.load(f)
 
         x = data.get("x", None)
         y = data.get("y", None)
         z = data.get("z", None)
+
+        if z is not None and z > 0.3 and z < 0.6:
+            z = 0.55
+
         grip = data.get("grip", None)
 
-        # Build a list of robot orders based on which JSON keys exist
         orders = []
-        # Move X/Y if present
-        if x is not None and y is not None:
-            orders.append((OrderType.MOVE_XY, [x, y]))
 
-        # Move Z if present
         if z is not None:
             orders.append((OrderType.MOVE_Z, [z]))
 
-        # Gripper logic if "grip" is present
-        # e.g., if grip < 0.4 => close, if grip > 0.7 => open
+        if x is not None and y is not None:
+            orders.append((OrderType.MOVE_XY, [x, y]))
+
         if grip is not None:
             if grip < 0.5:
-                orders.append((OrderType.GRIPPER_CLOSE, [0]))
+                # orders.append((OrderType.GRIPPER_CLOSE, [0]))
+                print("gripper close")
             else:
                 orders.append((OrderType.GRIPPER_OPEN, []))
 
@@ -52,8 +62,47 @@ class EvalGrasper(AutograsperBase):
         self.queue_orders(orders, time_between_orders=1, record=False)
         self.record_current_state()
 
-    def subtask1(self):
-        n_actions = 3
+    def center_sweep(self):
+        orders = [
+            (OrderType.GRIPPER_CLOSE, [0]),
+            (OrderType.MOVE_Z, [0]),
+            (OrderType.MOVE_XY, [0.5, 0.0]),
+            (OrderType.MOVE_XY, [0.5, 0.4]),
+            (OrderType.MOVE_XY, [0.5, 0.5]),
+            (OrderType.MOVE_XY, [0.5, 0.6]),
+            (OrderType.MOVE_XY, [0.4, 0.6]),
+            (OrderType.MOVE_XY, [0.4, 0.4]),
+            (OrderType.MOVE_XY, [0.6, 0.4]),
+        ]
+        self.queue_robot_orders(orders, delay=self.time_between_orders)
+
+    def get_color_pos(self, color):
+        return get_object_pos(self.bottom_image, self.robot_idx, color)
+
+    def check_grasping_success(self):
+        state = self.robot_state
+
+        gripper_pos = [state["x_norm"], state["y_norm"]]
+
+        object_position = self.get_color_pos("green")
+
+        if object_position is None:
+            return False
+
+        gripper_is_close_enough = (
+            np.linalg.norm(np.array(gripper_pos) - np.array(object_position)) < 0.10
+        )
+
+        return gripper_is_close_enough
+
+    def check_stacking_success(self):
+        if self.get_color_pos("green") is None:
+            print("stacking appears successful")
+            return True
+        print("stacking appears failed")
+        return False
+
+    def evaluate_policy(self, n_actions):
         for _ in range(n_actions):
             self.call_real_eval()
 
@@ -61,73 +110,26 @@ class EvalGrasper(AutograsperBase):
 
             self.perform_policy_action()
 
-            time.sleep(2)
+            time.sleep(3)
 
-        # After actions execute, check state and determine success
-        state = self.robot_state
-        gripper_pos = [state[0]["x_norm"], state[0]["y_norm"]]
+            if self.check_stacking_success():
+                print("look stacked")
 
-        def check_success():
-            state = self.robot_state
-            gripper_pos = [state[0]["x_norm"], state[0]["y_norm"]]
+    def subtask1(self):
+        n_actions = 3
+        self.evaluate_policy(n_actions)
 
-            object_position = get_object_pos(
-                self.bottom_image, self.robot_idx, "green", debug=True
-            )
-
-            gripper_is_close_enough = (
-                np.linalg.norm(np.array(gripper_pos) - np.array(object_position)) < 0.10
-            )
-            gripper_is_closed = state[0]["claw_norm"] < 0.4
-
-            return gripper_is_close_enough and gripper_is_closed
-
-        if check_success():
-            print("seems successful, staying")
-            self.queue_orders([(OrderType.MOVE_XY, gripper_pos)], time_between_orders=1)
-            self.record_current_state()
-        else:
-            print("seems unsuccessful, performing one more action")
-            self.call_real_eval()
-            time.sleep(5)
-            self.perform_policy_action()
-        time.sleep(5)
-
-        if check_success():
+        if self.check_grasping_success():
             self.failed = False
-            print("successful grasp")
         else:
-            print("failed grasp")
             self.failed = True
 
-        if self.failed:
-            return False
-        return True
-
-    def subtask2(self):
-        position = self.generate_new_block_position()
-
-        orders = [
-            (OrderType.MOVE_Z, [1]),
-            (OrderType.MOVE_XY, position),
-            (OrderType.MOVE_Z, [0.3]),
-            (OrderType.GRIPPER_OPEN, []),
-        ]
-        self.queue_orders(orders, time_between_orders=self.time_between_orders)
-
-        # evaluate
-        if get_object_pos(self.bottom_image, self.robot_idx, "green") is None:
-            self.failed = True
-        else:
-            self.failed = False
+        return self.failed is True
 
     def perform_task(self):
-        self.make_sure_red_box_is_center()
+        time.sleep(2)
 
-        proceed = self.subtask1()
-
-        if proceed:
-            self.subtask2()
+        self.subtask1()
 
         print("task complete")
 
@@ -163,7 +165,7 @@ class EvalGrasper(AutograsperBase):
         self.make_sure_red_box_is_center()
 
     def make_sure_red_box_is_center(self):
-        margin = 0.05
+        margin = 0.15
         red_position = get_object_pos(
             self.bottom_image, self.robot_idx, "red", debug=False
         )
@@ -218,13 +220,10 @@ class EvalGrasper(AutograsperBase):
     def call_real_eval(self):
         import subprocess
 
-        print("run script")
-        return
-
         # Define the arguments from the bash command
         args = [
             "bash",
-            "eval_bash/Staged_learning/stage_1_50_v2.sh",
+            self.policy_path,
         ]
 
         try:
@@ -232,4 +231,3 @@ class EvalGrasper(AutograsperBase):
             print("Policy action calculated.")
         except subprocess.CalledProcessError as e:
             print(f"Error occurred: {e}")
-

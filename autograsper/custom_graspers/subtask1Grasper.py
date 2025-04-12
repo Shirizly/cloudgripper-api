@@ -9,7 +9,7 @@ from typing import List, Tuple
 import math
 
 
-class RandomGrasper(AutograsperBase):
+class EvalGrasper(AutograsperBase):
     def __init__(self, config, shutdown_event):
         super().__init__(config, shutdown_event=shutdown_event)
 
@@ -21,17 +21,6 @@ class RandomGrasper(AutograsperBase):
             print("found")
         else:
             print("not found")
-
-    def sweep(self):
-        print("sweeping")
-        orders = [
-            (OrderType.MOVE_Z, [1]),
-            (OrderType.GRIPPER_CLOSE, [0]),
-            (OrderType.MOVE_XY, self.get_color_pos("red") + [0.0, 0.1]),
-            (OrderType.MOVE_Z, [0]),
-            (OrderType.MOVE_XY, self.get_color_pos("red") + [0.0, -0.1]),
-        ]
-        self.queue_orders(orders)
 
     def perform_policy_action(self):
         # Read the JSON to retrieve the proposed actions
@@ -73,23 +62,22 @@ class RandomGrasper(AutograsperBase):
         self.queue_orders(orders, time_between_orders=1, record=False)
         self.record_current_state()
 
-    def random_grasp(self):
-        import numpy as np
-
-        random_coordinates = [np.random.uniform(0.2, 0.8), np.random.uniform(0.2, 0.8)]
-
+    def center_sweep(self):
         orders = [
-            (OrderType.MOVE_XY, random_coordinates),
-            (OrderType.GRIPPER_OPEN, [0]),
-            (OrderType.MOVE_Z, [0]),
             (OrderType.GRIPPER_CLOSE, [0]),
+            (OrderType.MOVE_Z, [0]),
+            (OrderType.MOVE_XY, [0.5, 0.0]),
+            (OrderType.MOVE_XY, [0.5, 0.4]),
+            (OrderType.MOVE_XY, [0.5, 0.5]),
+            (OrderType.MOVE_XY, [0.5, 0.6]),
+            (OrderType.MOVE_XY, [0.4, 0.6]),
+            (OrderType.MOVE_XY, [0.4, 0.4]),
+            (OrderType.MOVE_XY, [0.6, 0.4]),
         ]
-        self.queue_orders(orders)
+        self.queue_robot_orders(orders, delay=self.time_between_orders)
 
     def get_color_pos(self, color):
-        import numpy as np
-
-        return np.array(get_object_pos(self.bottom_image, self.robot_idx, color))
+        return get_object_pos(self.bottom_image, self.robot_idx, color)
 
     def check_grasping_success(self):
         state = self.robot_state
@@ -107,23 +95,54 @@ class RandomGrasper(AutograsperBase):
 
         return gripper_is_close_enough
 
-    def perform_task(self):
-        time.sleep(2)
+    def check_stacking_success(self):
+        if self.get_color_pos("green") is None:
+            print("stacking appears successful")
+            return True
+        print("stacking appears failed")
+        return False
 
-        self.random_grasp()
+    def evaluate_policy(self, n_actions):
+        for _ in range(n_actions):
+            self.call_real_eval()
+
+            time.sleep(5)
+
+            self.perform_policy_action()
+
+            time.sleep(3)
+
+            if self.check_stacking_success():
+                print("look stacked")
+
+    def subtask1(self):
+        n_actions = 3
+        self.evaluate_policy(n_actions)
 
         if self.check_grasping_success():
             self.failed = False
         else:
             self.failed = True
 
-        return
+        return self.failed is True
+
+    def subtask2(self):
+        self.evaluate_policy(10)
+        if self.check_stacking_success():
+            self.failed = False
+        else:
+            self.failed = True
+
+    def perform_task(self):
+        time.sleep(2)
+
+        if self.subtask1():
+            print("subtask 2")
+            self.subtask2()
+
+        print("task complete")
 
     def reset_task(self):
-        if math.dist(self.get_color_pos("red"), self.get_color_pos("green")) < 0.2:
-            self.sweep()
-        self.make_sure_red_box_is_center()
-
         self._reset_target_block()
         return
 
@@ -141,41 +160,47 @@ class RandomGrasper(AutograsperBase):
     def _reset_target_block(self):
         block_pos = self.generate_new_block_position()
 
+        target_color = "green"
+        object_position = get_object_pos(
+            self.bottom_image, self.robot_idx, target_color
+        )
         self.pickup_and_place_object(
-            self.get_color_pos("green"),
+            object_position,
             0,
             0,
             target_position=block_pos,
         )
-        if math.dist(self.get_color_pos("red"), self.get_color_pos("green")) < 0.2:
-            self.sweep()
-        self.make_sure_red_box_is_center()
 
-    def recover_after_fail(self):
-        self._reset_target_block()
         self.make_sure_red_box_is_center()
 
     def make_sure_red_box_is_center(self):
-        margin = 0.10
+        margin = 0.15
+        red_position = get_object_pos(
+            self.bottom_image, self.robot_idx, "red", debug=False
+        )
 
-        if math.dist(self.get_color_pos("red"), [0.5, 0.5]) > margin:
+        if abs(red_position[0] - 0.5) > margin and abs(red_position[1] - 0.5) > margin:
             print("red moved, moving back to center")
             self.move_red_to_center()
         else:
             print("red at correct position")
 
     def move_red_to_center(self):
-        self.pickup_and_place_object(
-            self.get_color_pos("red"), 0, 0, target_position=[0.5, 0.5]
+        target_color = "red"
+        object_position = get_object_pos(
+            self.bottom_image, self.robot_idx, target_color
         )
+        self.pickup_and_place_object(object_position, 0, 0, target_position=[0.5, 0.5])
 
     def generate_new_block_position(self):
         margin = 0.20
         while True:
-            x = np.random.uniform(0.25, 0.75)
-            y = np.random.uniform(0.25, 0.75)
+            x = np.linspace(0.2, 0.8, 0.05)
+            y = np.linspace(0.2, 0.8, 0.05)
             avoid_position = [0.5, 0.5]
-            dist = math.dist([x, y], avoid_position)
+            dist = np.sqrt(
+                math.pow(x - avoid_position[0], 2) + math.pow(y - avoid_position[1], 2)
+            )
 
             if dist > margin:
                 break
@@ -199,4 +224,19 @@ class RandomGrasper(AutograsperBase):
             (OrderType.MOVE_Z, [target_height]),
             (OrderType.GRIPPER_OPEN, []),
         ]
-        self.queue_orders(orders)
+        self.queue_orders(orders, time_between_orders=self.time_between_orders)
+
+    def call_real_eval(self):
+        import subprocess
+
+        # Define the arguments from the bash command
+        args = [
+            "bash",
+            self.policy_path,
+        ]
+
+        try:
+            _ = subprocess.run(args, check=True)
+            print("Policy action calculated.")
+        except subprocess.CalledProcessError as e:
+            print(f"Error occurred: {e}")
