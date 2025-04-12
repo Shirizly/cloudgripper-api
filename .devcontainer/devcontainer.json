@@ -1,36 +1,58 @@
 {
-	"name": "CloudGripper Api",
-	"build": { 
-		"context": "..",
-		"dockerfile": "Dockerfile"
-	},
+"name": "CloudGripper API",
+"build": { 
+	"context": "..",
+	"dockerfile": "Dockerfile"
+},
 
-	"features": {
-		"ghcr.io/devcontainers/features/nvidia-cuda:1.2.0": {}
-	},
 
-	"runArgs": [
-		"--gpus",
-		"all",
-		"--privileged"
-	],
+"appPort": [ 3003, 5093,"6082:6082"],
 
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				"charliermarsh.ruff"
-			]
-		}
-	},
+  "forwardPorts": [6081],
+  "portsAttributes": {
+    "6081": {
+      "label": "desktop"
+    }
+  },
 
-	 "mounts": [
-		"source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
-	  ],
-	
-	 "containerEnv": {
-		"DISPLAY": "${localEnv:DISPLAY}"
-	},
 
-	"postCreateCommand": "bash .devcontainer/install-tools.sh",
+  "features": {
+    "ghcr.io/devcontainers-extra/features/fish-apt-get:1": {},
+    "ghcr.io/devcontainers/features/desktop-lite:1": {
+     "password": "noPassword",
+     "webPort" : "6081",
+     "vncPort" : "5091"
+   }
+  },
+
+  "customizations": {
+    "vscode": {
+    "extensions": [
+      "ms-python.python",
+      "charliermarsh.ruff",
+      "ms-toolsai.jupyter",
+      "HenryTsz.nvim",
+      "ms-azuretools.vscode-docker"
+    ]
+
+    }
+  },
+
+"runArgs": [
+	"--gpus",
+	"all",
+	//"--privileged"
+],
+
+
+// "mounts": [
+//	"source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
+//  ],
+//
+// "containerEnv": {
+//	"DISPLAY": "${localEnv:DISPLAY}"
+//},
+
+//"postCreateCommand": "bash .devcontainer/install-tools.sh"
 
 }

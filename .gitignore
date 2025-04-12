@@ -49,3 +49,5 @@ visualize.py
 visualize_video.py
 finetune.py
 real_eval.py
+uv.lock
+proposed_action.json
