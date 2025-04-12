@@ -4,11 +4,13 @@ import time
 import cv2
 import logging
 
+import os
+
 from flask import Flask, Response
 
 from coordinator import DataCollectionCoordinator
-from custom_graspers.example_grasper import ExampleGrasper
 from custom_graspers.evaluation_grasper import EvalGrasper
+from custom_graspers.random_grasping_task import RandomGrasper
 from utils import load_config
 
 
@@ -52,21 +54,22 @@ def generate_frames():
                     )
         else:
             # If no frame is available, sleep briefly.
-            time.sleep(0.05)
+            time.sleep(0.02)
 
 
 def main():
     global global_coordinator
 
-    config = load_config("autograsper/config.yaml")
+    config_path = os.path.join(os.getcwd(), "autograsper", "config.yaml")
+    config_path = os.path.join(os.getcwd(), "config.yaml")
+    config = load_config(config_path)
     shutdown_event = threading.Event()
 
-    grasper = EvalGrasper(config, shutdown_event=shutdown_event)
+    grasper = RandomGrasper(config, shutdown_event=shutdown_event)
     global_coordinator = DataCollectionCoordinator(config, grasper, shutdown_event)
     global_coordinator.start()
 
     try:
-        # Run the Flask app; it will listen on all interfaces (0.0.0.0) at port 5000.
         app.run(host="0.0.0.0", port=3000, debug=False, threaded=True)
     except Exception as e:
         logging.error("Flask app error: %s", e)

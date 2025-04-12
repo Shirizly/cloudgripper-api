@@ -43,6 +43,8 @@ class AutograsperBase(ABC):
             raise ValueError("shutdown_event must be provided")
         self.shutdown_event = shutdown_event
 
+        self.bottom_image = None
+
         self.token = os.getenv("CLOUDGRIPPER_TOKEN")
         if not self.token:
             raise ValueError("CLOUDGRIPPER_TOKEN environment variable not set")
@@ -118,7 +120,7 @@ class AutograsperBase(ABC):
                     print(f"Unexpected error during perform_task: {e}")
                     self.failed = True
                     self.shutdown_event.set()
-                    raise
+                    raise Exception(e)
                 if self.shutdown_event.is_set() or self.state == RobotActivity.FINISHED:
                     break
                 self.state = RobotActivity.RESETTING
@@ -161,7 +163,10 @@ class AutograsperBase(ABC):
 
     def get_state(self):
         "Update state for robot"
-        self.robot.get_state()
+
+        self.robot_state = self.robot.get_state()
+
+        return self.robot_state
 
     def execute_order(self, order, output_dir, reverse_xy):
         utils.execute_order(self.robot, order, output_dir, reverse_xy)
@@ -169,7 +174,7 @@ class AutograsperBase(ABC):
     def queue_orders(
         self,
         order_list: List[Tuple],
-        time_between_orders: float,
+        time_between_orders: float = None,
         output_dir: str = "",
         reverse_xy: bool = False,
         record=True,
@@ -177,6 +182,9 @@ class AutograsperBase(ABC):
         """
         Queue a list of orders for the robot to execute sequentially and save state after each order.
         """
+        if time_between_orders is None:
+            time_between_orders = self.time_between_orders
+
         for order in order_list:
             if self.shutdown_event.is_set():
                 break
