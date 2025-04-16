@@ -1,0 +1,121 @@
+import cv2
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torchvision import transforms
+from scipy.ndimage import binary_opening, binary_closing
+from skimage.metrics import structural_similarity as ssim
+from PIL import Image
+
+class ImageProcessingPipeline:
+    def __init__(self, image, background):
+        """
+        Initialize the processing pipeline with an image and its background.
+
+        Args:
+            image (np.ndarray or torch.Tensor): The input image.
+            background (np.ndarray or torch.Tensor): The background image.
+        """
+        self.image = self._to_tensor(image)
+        self.background = self._to_tensor(background)
+        self.aligned_background = self.background
+        self.mask = None
+        self.masks = None
+
+    def _to_tensor(self, image):
+        if isinstance(image, np.ndarray):
+            return transforms.ToTensor()(image)
+        return image
+
+    def _to_numpy(self, tensor):
+        return (tensor.numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+
+    def align_images(self, piecewise=False, grid_size=(4, 4)):
+        """Aligns the background to the image either globally or piecewise."""
+        if piecewise:
+            self.aligned_background = self._align_images_piecewise(grid_size)
+        else:
+            self.aligned_background = self._align_images()
+        return self
+
+    def _align_images(self):
+        """Performs global alignment of the background using feature matching."""
+        image_np = self._to_numpy(self.image)
+        background_np = self._to_numpy(self.background)
+
+        gray_image = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+        gray_background = cv2.cvtColor(background_np, cv2.COLOR_RGB2GRAY)
+
+        orb = cv2.ORB_create(500)
+        keypoints1, descriptors1 = orb.detectAndCompute(gray_image, None)
+        keypoints2, descriptors2 = orb.detectAndCompute(gray_background, None)
+
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = sorted(bf.match(descriptors1, descriptors2), key=lambda x: x.distance)
+
+        src_pts = np.float32([keypoints1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+        dst_pts = np.float32([keypoints2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+
+        H, _ = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
+        return torch.tensor(cv2.warpPerspective(background_np, H, (image_np.shape[1], image_np.shape[0])), dtype=torch.float32)
+
+    def subtract_background(self, method="euclidean", **kwargs):
+        """Applies background subtraction using the selected method."""
+        if method == "euclidean":
+            self.mask = self._euclidean_subtraction()
+        elif method == "multi_scale":
+            self.mask = self._multi_scale_subtraction(**kwargs)
+        elif method == "ssim":
+            self.mask = self._compute_ssim_mask(**kwargs)
+        return self
+
+    def _euclidean_subtraction(self):
+        distance = torch.sqrt(torch.sum((self.image - self.aligned_background) ** 2, dim=0))
+        threshold = 0.15
+        return (distance > threshold).float()
+
+    def refine_mask(self, structure_size=3):
+        """Applies morphological operations to refine the mask."""
+        mask_np = self.mask.numpy()
+        refined_mask = binary_opening(mask_np, structure=np.ones((structure_size, structure_size)))
+        refined_mask = binary_closing(refined_mask, structure=np.ones((2*structure_size, 2*structure_size)))
+        self.mask = torch.tensor(refined_mask, dtype=torch.float32)
+        return self
+
+    def segment_objects(self, min_size=3000):
+        """Segments the foreground into distinct objects using connected components analysis."""
+        mask_np = (self.mask.numpy() * 255).astype(np.uint8)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_np, connectivity=4)
+        self.masks = torch.stack([torch.tensor((labels == i).astype(np.uint8)) for i in range(1, num_labels) if stats[i, cv2.CC_STAT_AREA] > min_size])
+        return self
+
+    def create_mask_image(self):
+        """Creates a colorized segmentation mask image."""
+        mask_image = torch.zeros((3, self.masks.shape[1], self.masks.shape[2]), dtype=torch.uint8)
+        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255)]
+        for i, mask in enumerate(self.masks):
+            color = colors[i % len(colors)]
+            for c in range(3):
+                mask_image[c, :, :] += mask * color[c]
+        return mask_image
+
+    def get_filtered_image(self):
+        """Applies the segmentation mask to the original image."""
+        mask = self.masks.sum(dim=0).clamp(0, 1)
+        return self.image * mask
+
+    def process(self):
+        """Executes the full pipeline."""
+        return self.align_images().subtract_background().refine_mask().segment_objects()
+
+# Example usage
+if __name__ == "__main__":
+    image = np.array(Image.open("query_image.png"))
+    background = np.array(Image.open("median_image.png"))
+    
+    pipeline = ImageProcessingPipeline(image, background).process()
+    filtered_image = pipeline.get_filtered_image()
+    mask_image = pipeline.create_mask_image()
+    
+    Image.fromarray(pipeline._to_numpy(filtered_image)).save("filtered_image_pipeline.png")
+    Image.fromarray(pipeline._to_numpy(mask_image)).save("mask_image_pipeline.png")

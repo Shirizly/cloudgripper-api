@@ -63,7 +63,7 @@ def update_camera():
 # Function to handle keyboard input
 def on_press(key):
     global running, current_config
-    step_size = 0.025  # Step size for robot movement
+    step_size = 0.05  # Step size for robot movement
     try:
         if key.char == "a":  # Move left (X-)
             current_config[0] -= step_size

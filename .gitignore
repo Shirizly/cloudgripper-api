@@ -5,6 +5,8 @@
 **/__pycache__/
 **.hdf5
 **.env
+*.png
+*.pth
 
 library/__pycache__/__init__.cpython-38.pyc
 library/__pycache__
@@ -21,4 +23,5 @@ autograsper/stage_1_second_new_collection_full copy
 autograsper/successful2 copy
 autograsper/test
 recordings
+processed_recordings
 temp_stuff

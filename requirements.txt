@@ -5,3 +5,9 @@ pybase64
 python-dotenv
 pynput
 matplotlib
+torch
+torchvision
+os 
+ast
+PIL
+ultralytics
