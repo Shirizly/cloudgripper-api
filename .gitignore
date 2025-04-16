@@ -51,3 +51,7 @@ finetune.py
 real_eval.py
 uv.lock
 proposed_action.json
+recordings
+processed_recordings
+image_processing_data
+backup
