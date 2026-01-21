@@ -153,7 +153,7 @@ class Recorder:
             with self.image_lock:
                 self.image_top = data[0]
                 self.bottom_image = get_undistorted_bottom_image(
-                    self.robot, self.camera_matrix, self.distortion_coeffs
+                    data[1], self.camera_matrix, self.distortion_coeffs
                 )
             self.state = data[2]
             self.timestamp = data[3]

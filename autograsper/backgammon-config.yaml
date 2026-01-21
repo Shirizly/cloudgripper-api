@@ -5,12 +5,20 @@ camera:
     - [0.0, 0.0, 1.0]
   d: [-0.07727407195057368, -0.047989733519315944, 0.12157420705123315, -0.09667542135039282]
   record: true
-  fps: 2.5
+  fps: 4.0
   record_only_after_action: False
-  save_images_individually: true
+  save_images_individually: False
+
+fence:
+  center: [0.5, 0.49]
+  size: [0.94, 0.955]
+  manipulation_boundary:
+    x: [0.3, 0.7]
+    y: [0.3, 0.7]
+
 
 experiment:
-  name: "backgammon"
+  name: "Push_chickpeas"
   robot_idx: "robot24"
   timeout_between_experiments: 2.0
-  time_between_orders: 2.5
+  time_between_orders: 1.5

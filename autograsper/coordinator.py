@@ -6,8 +6,11 @@ import concurrent.futures
 import threading
 from dataclasses import dataclass
 from queue import Queue, Empty
+import numpy as np
+import cv2
 
 from grasper import RobotActivity, AutograsperBase
+from image_collector.cv2displayer import update_images
 from recording import Recorder
 from file_manager import FileManager
 
@@ -31,16 +34,18 @@ class DataCollectionCoordinator:
     """
 
     def __init__(
-        self, config, grasper: AutograsperBase, shutdown_event: threading.Event
-    ):
+        self, config, grasper: AutograsperBase, shutdown_event: threading.Event, visualize: bool = False):
         self.config = config
         self.shutdown_event = shutdown_event
         self.shared_state = SharedState()
         self.autograsper = grasper
+        self.visualize = visualize
+        cv2.startWindowThread()
         # Message queue for non-UI messages.
         self.msg_queue = Queue()
         # Separate UI queue so that image updates can be handled in the main thread.
         self.ui_queue = Queue()
+
 
         # Read configuration with explicit error handling.
         try:
@@ -61,22 +66,36 @@ class DataCollectionCoordinator:
         Polls the autograsper and recorder for updates and posts messages to the message queue.
         """
         while not self.shutdown_event.is_set():
-            # Post state update message.
-            state_msg = {"type": "state_update", "state": self.autograsper.state}
-            self.msg_queue.put(state_msg)
+            try:
+                # Post state update message.
+                state_msg = {"type": "state_update", "state": self.autograsper.state}
+                self.msg_queue.put(state_msg)
 
-            self._check_if_record_is_requested()
+                self._check_if_record_is_requested()
+                # If a recorder exists, push an image update message onto the UI queue.
+                if self.shared_state.recorder is not None:
+                    top_img = self.shared_state.recorder.image_top
+                    bottom_img = self.shared_state.recorder.bottom_image
+                    if self.visualize and top_img is not None and bottom_img is not None:
+                        top_img_np = top_img.copy()
+                        bottom_img_np = bottom_img.copy()
+                        bottom_img_np = np.transpose(bottom_img_np, (1, 0, 2))
 
-            # If a recorder exists, push an image update message onto the UI queue.
-            if self.shared_state.recorder is not None:
-                bottom_img = self.shared_state.recorder.bottom_image
-                if bottom_img is not None:
-                    ui_msg = {"type": "image_update", "image": bottom_img.copy()}
-                    self.ui_queue.put(ui_msg)
-                    # TODO make this safe against race conditions
-                    self.autograsper.bottom_image = bottom_img.copy()
-                    self.autograsper.robot_state = self.shared_state.recorder.state
-            self.shutdown_event.wait(timeout=0.1)
+                        update_images(
+                            [top_img_np, bottom_img_np],
+                            window_name="Live Robot Feed"
+                        )
+                        cv2.waitKey(1)
+                    if bottom_img is not None:
+                        ui_msg = {"type": "image_update", "image": bottom_img.copy()}
+                        self.ui_queue.put(ui_msg)
+                        # TODO make this safe against race conditions
+                        self.autograsper.bottom_image = bottom_img.copy()
+                        self.autograsper.robot_state = self.shared_state.recorder.state
+                self.shutdown_event.wait(timeout=0.1)
+            except Exception as e:
+                logger.exception("Error in state monitoring: %s", e)
+                self.shutdown_event.set()
 
     def _check_if_record_is_requested(self):
         if (

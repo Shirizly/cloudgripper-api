@@ -186,6 +186,7 @@ class AutograsperBase(ABC):
             time_between_orders = self.time_between_orders
 
         for order in order_list:
+            print(f"Executing order: {order}")
             if self.shutdown_event.is_set():
                 break
             self.execute_order(order, output_dir, reverse_xy)

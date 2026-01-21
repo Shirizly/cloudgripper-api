@@ -158,6 +158,7 @@ class GripperRobot:
         Returns:
             Optional[str]: The time taken for the rotation.
         """
+        # print(f"Rotating to angle {angle}")
         response = self._make_request(f"rotate/{angle}")
         return self._safe_get(response, "time")
 

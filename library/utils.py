@@ -80,8 +80,9 @@ def execute_order(
 
     try:
         order_type, order_value = order
-
-        if order_type is not OrderType.ROTATE:
+        if order_type == OrderType.ROTATE:
+            order_value[0] = int(order_value[0])
+        else:
             order_value = np.clip(order_value, 0, 1)
 
         start_time = 0
@@ -168,6 +169,9 @@ def queue_orders_with_input(
                 input("Press Enter to execute...")
             elif order_type == OrderType.GRIPPER_CLOSE:
                 print("Intended command: Gripper Close")
+                input("Press Enter to execute...")
+            elif order_type == OrderType.ROTATE:
+                print(f"Intended command: Rotate to {order_value[0]}")
                 input("Press Enter to execute...")
 
             execute_order(robot, order, output_dir)

@@ -81,7 +81,9 @@ def execute_order(
     try:
         order_type, order_value = order
 
-        if order_type is not OrderType.ROTATE:
+        if order_type == OrderType.ROTATE:
+            order_value[0] = int(order_value[0])
+        else:
             order_value = np.clip(order_value, 0, 1)
 
         start_time = 0
@@ -288,7 +290,7 @@ def pick_random_positions(
     return positions
 
 
-def get_undistorted_bottom_image(
+def get_undistorted_bottom_image_old(
     robot: GripperRobot, m: np.ndarray, d: np.ndarray
 ) -> np.ndarray:
     """
@@ -302,6 +304,17 @@ def get_undistorted_bottom_image(
     image, _ = robot.get_image_base()
     return undistort(image, m, d)
 
+def get_undistorted_bottom_image(image, m: np.ndarray, d: np.ndarray
+) -> np.ndarray:
+    """
+    Get an undistorted image from the robot's camera.
+
+    :param image: the image to undistort
+    :param m: Camera matrix for undistortion
+    :param d: Distortion coefficients
+    :return: An undistorted image
+    """
+    return undistort(image, m, d)
 
 def run_calibration(height, robot):
     robot.gripper_close()
