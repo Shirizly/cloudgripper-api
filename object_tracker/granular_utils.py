@@ -41,7 +41,7 @@ def create_occupancy_mask(image: np.ndarray, reference_empty: np.ndarray, thresh
     # Compute color difference and create mask for pixels NOT matching reference
 
     color_diff = np.abs(image.astype(np.float32) - reference_empty.astype(np.float32))
-    max_diff = 255 * 0.1  # 10% threshold
+    max_diff = 255 * 0.11  # 10% threshold
     diff = np.max(color_diff, axis=2) if len(color_diff.shape) == 3 else color_diff
     
     # Create binary mask
@@ -57,12 +57,69 @@ def create_occupancy_mask(image: np.ndarray, reference_empty: np.ndarray, thresh
     red_mask = cv2.inRange(image, lower_red, upper_red)
     green_mask = cv2.inRange(image, lower_green, upper_green)
     blue_mask = cv2.inRange(image, lower_blue, upper_blue)
-    primary_color_mask = cv2.bitwise_or(cv2.bitwise_or(red_mask, green_mask), blue_mask)
+    lower_yellow = np.array([0, 150, 150], dtype=np.uint8)
+    upper_yellow = np.array([120, 255, 255], dtype=np.uint8)
+    yellow_mask = cv2.inRange(image, lower_yellow, upper_yellow)
+    primary_color_mask = cv2.bitwise_or(cv2.bitwise_or(red_mask, green_mask), cv2.bitwise_or(blue_mask, yellow_mask))
     mask = cv2.bitwise_and(mask, cv2.bitwise_not(primary_color_mask))
+
+    # also remove background solid color
+    lower_gray = np.array([170, 170, 170], dtype=np.uint8)
+    upper_gray = np.array([240, 240, 240], dtype=np.uint8)
+    gray_mask = cv2.inRange(image, lower_gray, upper_gray)
+    lower_black = np.array([0, 0, 0], dtype=np.uint8)
+    upper_black = np.array([40, 40, 40], dtype=np.uint8)
+    black_mask = cv2.inRange(image, lower_black, upper_black)
+    gray_mask = cv2.bitwise_or(gray_mask, black_mask)
+    mask = cv2.bitwise_and(mask, cv2.bitwise_not(gray_mask))
     
     return mask
 
-def clean_occupancy_mask(mask: np.ndarray, kernel_size: int = 5, min_size: int = 300) -> np.ndarray:
+def create_chickpea_mask(image: np.ndarray, threshold: int = 0.000001) -> np.ndarray:
+    """
+    Create a binary mask specifically for chickpeas by comparing image to a distribution of colors.
+    
+    Args:
+        image: Current image from camera
+        reference_empty: Reference image of empty glass plate
+        """
+    # Define multiple gaussian distributions for different shades of chickpeas
+    # These values would ideally be determined empirically by analyzing sample images
+    Mean_colors = [[54.15659 , 60.272285 ,68.80524 ],
+                   [ 74.6377 ,   85.772385 ,101.56367 ],
+                   [136.10983, 143.45859, 153.23396],
+                   [122.02655 , 122.256775 ,133.88206]]
+    covariances = [[[121.12808 , 120.948555 ,135.46205 ],
+                    [120.948555 ,171.10521  ,238.90141 ],
+                    [135.46205 , 238.90141,  380.1807  ]],
+                    [[345.65894 ,336.87213 ,323.93698],
+                    [336.87213 ,384.97235 , 425.1901 ],
+                    [323.93698 ,425.1901  ,542.6201 ]],
+                    [[532.7858  ,436.9837  ,328.4652 ],
+                    [436.9837  ,435.40802 ,404.0879 ],
+                    [328.46527 ,404.0879  ,466.86096]],
+                    [[2864.9705 ,2975.4531 ,2728.6943],
+                    [2975.453 , 3776.381 , 3765.613 ],
+                    [2728.6943, 3765.613 , 4020.4883]]]
+    weights = [0.3, 0.3, 0.3, 0.1]  # relative weights of each gaussian
+
+    chickpea_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+    for mean, cov, weight in zip(Mean_colors, covariances, weights):
+        mean = np.array(mean)
+        cov = np.array(cov)
+        inv_cov = np.linalg.inv(cov)
+        diff = image.astype(np.float32) - mean.astype(np.float32)
+        mahalanobis_dist = np.einsum('...i,ij,...j->...', diff, inv_cov, diff)
+        gaussian_prob = np.exp(-0.5 * mahalanobis_dist) / np.sqrt((2 * np.pi) ** 3 * np.linalg.det(cov))
+        # threshold_value = 0.00001  # This threshold may need tuning
+        # chickpea_mask |= (gaussian_prob > threshold_value).astype(np.uint8) * 255
+        # Alternatively, we can use the probabilities as weights to create a soft mask
+        chickpea_mask += ((gaussian_prob * weight)*2100000).astype(np.uint8)
+    # chickpea_mask = (chickpea_mask>threshold).astype(np.uint8)*255
+    return chickpea_mask
+        
+
+def clean_occupancy_mask(mask: np.ndarray, kernel_size: int = 3, min_size: int = 300) -> np.ndarray:
     """
     Clean occupancy mask using morphological operations.
     
@@ -205,7 +262,10 @@ def process_image(image: np.ndarray, reference_empty: np.ndarray,
     # cv2.destroyAllWindows()
     # cv2.imwrite("cropped_image.png", cropped_image)
     # cv2.imwrite("cropped_reference.png", cropped_reference)
-    mask = create_occupancy_mask(cropped_image, cropped_reference)
+    # mask = create_occupancy_mask(cropped_image, cropped_reference)
+    mask = create_chickpea_mask(cropped_image)
+    masked_image = cv2.bitwise_and(cropped_image, cropped_image, mask=mask)
+    mask = create_occupancy_mask(masked_image, cropped_reference)
     # cv2.imwrite("raw_mask.png", mask)
     clean_mask, num_labels, stats, centroids = clean_occupancy_mask(mask, min_size=min_size)
 
@@ -238,7 +298,7 @@ def check_reset_needed(mask):
         occupied_area = cv2.countNonZero(cv2.bitwise_and(mask, workspace_mask))
 
         occupancy_ratio = occupied_area / mask_area
-        threshold = 0.5  # e.g., if less than 50% of mask is in the main workspace, needs resetting
+        threshold = 0.3  # e.g., if less than 30% of mask is in the main workspace, needs resetting
         if occupancy_ratio < threshold:
             print(f"Main workspace needs reset: occupancy ratio {occupancy_ratio:.2f}")
             return True

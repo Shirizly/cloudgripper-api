@@ -38,7 +38,8 @@ def update_images(images, window_name="Robot Images"):
 
     # Resize all images to the same height, maintaining aspect ratio
     # target_height = min(height0, height1)
-    target_height = images[0].shape[0]*2  # double the height of first image
+    target_height = images[0].shape[0] 
+    target_height = 600
     resized_images = []
     for image in images:
         aspect_ratio = image.shape[1] / image.shape[0]

@@ -150,7 +150,7 @@ def check_placement(dist, tool_mask, cx, cy, r):
 
 def make_tool_mask(w_px, h_px, angle_deg):
     # Create a binary mask of the tool at the given angle
-    # tool is vertical in angle_deg=0
+    # tool is vertical (along height) in angle_deg=0
     r = int(np.ceil(0.5 * np.hypot(h_px, w_px)))
     pad = 2 * r + 1
 
@@ -158,7 +158,7 @@ def make_tool_mask(w_px, h_px, angle_deg):
 
     center = (r, r)
 
-    rect = (center, (h_px, w_px), float(angle_deg))
+    rect = (center, (w_px, h_px), float(-angle_deg)) # negative angle for cv2 convention to match robot coordinate system
     box = cv2.boxPoints(rect).astype(np.int32)
     cv2.fillConvexPoly(mask, box, 1)
     cv2.imwrite(f'tool_mask_{w_px}x{h_px}_angle{angle_deg}.png', mask*255)
@@ -205,7 +205,7 @@ def find_tool_placements(
                 "angle": angle,
                 "clearance_px": clearance
             })
-            
+
             if clearance >= MIN_CLEARANCE_PX:
                 break
 

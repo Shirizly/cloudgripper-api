@@ -1,4 +1,5 @@
 # custom_graspers/random_push_grasper.py
+import logging
 from matplotlib.pyplot import flag
 from grasper import AutograsperBase, RobotActivity, sleep_with_shutdown
 import numpy as np
@@ -101,7 +102,7 @@ class RandomPushGrasper(AutograsperBase):
             
             if bottom_img is None:
                 print("Warning: No bottom image available for mask processing")
-                sleep_with_shutdown(1)
+                sleep_with_shutdown(1,)
             else:
                 capture_flag = True
         cv2.imwrite("latest_bottom_image.png", bottom_img) # for debugging
@@ -120,7 +121,7 @@ class RandomPushGrasper(AutograsperBase):
                 return False
             return True
         except Exception as e:
-            print(f"Error processing image: {e}")
+            logging.error(f"Error processing image: {e}")
             return False
 
 
@@ -141,21 +142,24 @@ class RandomPushGrasper(AutograsperBase):
 
     def perform_task(self):        
         orders = []
-        print("start new task session")
-        print(self.robot_state)
-        
+        logging.info("start new task session")
+        logging.info(self.robot_state)
+        if self.latest_mask is None:
+            self.update_mask_and_process()
+
         self.queue_orders([(OrderType.MOVE_Z, [self.clearance_height])])
         time.sleep(1)
         self.update_robot_state()
-        print(self.robot_state)
+        logging.info(self.robot_state)
         try:
             if self.robot_state['z_norm']>self.grasp_height+0.02:
                 # didn't need sweep, now need to find empty place to put tool
-                tool_placement = find_tool_placements(self.latest_mask,self.image_space_tool_dimensions,[0,30,45,60,90,120,135,150],((self.image_space_manip_boundary[0], self.image_space_manip_boundary[1]), (self.image_space_manip_boundary[0], self.image_space_manip_boundary[1]))) # currently this function is broken, need to fix
-                print(tool_placement)
+                tool_placement = find_tool_placements(self.latest_mask,self.image_space_tool_dimensions,[0,30,45,60,90,120,135,150],((self.image_space_manip_boundary[0], self.image_space_manip_boundary[1]), (self.image_space_manip_boundary[0], self.image_space_manip_boundary[1]))) 
+                logging.info("Tool placement: %s", tool_placement)
+                # print(tool_placement)
                 if tool_placement is None:
                     self.sweep_wall(random.sample(self.walls, 1))
-                else: 
+                else: # tool is already in position to start pushing
                     pos_pixel = tool_placement.get("pos_px")
                     pos_world = self.pix2robtrans.pix_to_robot(*pos_pixel)
                     orders = [(OrderType.MOVE_XY, pos_world),
@@ -218,6 +222,50 @@ class RandomPushGrasper(AutograsperBase):
         print(f"Tool grip quality: {grip_quality:.2f}")
         return grip_quality
     
+    def perform_grab_tool(self, check_tool_grasp=False) -> float:
+        self.robot.move_z(1.0)
+        time.sleep(1.0)
+        self.robot.gripper_open()
+        time.sleep(1.0)
+        self.robot.rotate(0)
+        time.sleep(1.0)
+        print("Moving to tool position...", flush=True)
+        self.robot.move_xy(0.03, 0.49)
+        time.sleep(1)
+        self.robot.move_z(0.27)
+        time.sleep(1)
+        self.robot.gripper_close()
+
+        try: 
+            self.robot.move_z(1.0)
+            time.sleep(1.0)
+            self.robot.move_xy(0.5,0.41)
+            time.sleep(1.0)
+            self.robot.rotate(90)
+            time.sleep(1.0)
+            if check_tool_grasp:
+                top_img, _ = self.robot.get_image_top()
+                roi_cfg = {'x': [0.46, 0.58], 'y': [0.54, 0.63]}
+                x_range = roi_cfg.get('x',[0.4,0.7])
+                y_range = roi_cfg.get('y',[0.1,0.8])
+                h, w, _ = top_img.shape
+                x_min = int(x_range[0]*w)
+                x_max = int(x_range[1]*w)
+                y_min = int(y_range[0]*h)
+                y_max = int(y_range[1]*h)
+                roi_img = top_img[y_min:y_max, x_min:x_max]
+                # Define color range for tool detection (example: white tool in BGR)
+                lower_bgr = (160, 160, 120)
+                upper_bgr = (190, 210, 190)
+                grip_quality = self.check_tool_grip()
+            else:
+                grip_quality = 0.0
+            return grip_quality
+        except Exception as e:
+            print(f"Error during tool grasping: {e}")
+        return 0.0
+
+    
     def startup(self):
         # check visually if tool is in hand:
         try: 
@@ -235,8 +283,16 @@ class RandomPushGrasper(AutograsperBase):
             if grip_quality < self.tool_detection_threshold:
                 print("Tool not detected properly in hand. Please adjust tool and restart.")
                 self.robot.gripper_open()
-                self.shutdown_event.set()
-                return
+                while grip_quality < self.tool_detection_threshold and not self.shutdown_event.is_set():
+                    print(f"grip quality is: {grip_quality:.2f}, below threshold {self.tool_detection_threshold}, attempting to grab tool...")
+                    sleep_with_shutdown(60,self.shutdown_event)
+                    self.robot.gripper_close() # close and open gripper to warn user grasp attempt is coming
+                    sleep_with_shutdown(2,self.shutdown_event)
+                    self.robot.gripper_open()
+                    sleep_with_shutdown(10,self.shutdown_event)
+                    grip_quality = self.perform_grab_tool(check_tool_grasp=True)
+                if self.shutdown_event.is_set():
+                    return
         except Exception as e:
             print(f"Error during tool detection: {e}")
             self.shutdown_event.set()
@@ -406,7 +462,7 @@ class RandomPushGrasper(AutograsperBase):
         while not self.shutdown_event.is_set():
             if self.state == RobotActivity.STARTUP:
                 self.startup()
-                # self.state = RobotActivity.ACTIVE
+                # self.state = RobotActivity.ACTIVE # for testing without reset
 
             if self.state == RobotActivity.ACTIVE:
                 try:

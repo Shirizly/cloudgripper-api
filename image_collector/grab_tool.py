@@ -118,28 +118,20 @@ state = robot.get_state()
 current_config = list(state[0].values())[:5]  # x, y, z, rotation, gripper
 print(f"Current configuration: {[ '%.2f' % elem for elem in current_config]}\n", flush=True)
 
-# Move robot to specific position and grab tool
-try:
-    
-    # Start camera thread to visualize and record
+def perform_grab_tool(robot: GripperRobot, check_tool_grasp=False) -> float:
+    robot.move_z(1.0)
+    time.sleep(1.0)
+    robot.gripper_open()
+    time.sleep(1.0)
+    robot.rotate(0)
+    time.sleep(1.0)
+    print("Moving to tool position...", flush=True)
+    robot.move_xy(0.03, 0.49)
     time.sleep(1)
-    camera_thread = threading.Thread(target=update_camera, daemon=True)
-    camera_thread.start()
-    if True:
-        robot.move_z(1.0)
-        time.sleep(1.0)
-        robot.gripper_open()
-        time.sleep(1.0)
-        robot.rotate(0)
-        time.sleep(1.0)
-        print("Moving to tool position...", flush=True)
-        robot.move_xy(0.03, 0.49)
-        time.sleep(1)
-        robot.move_z(0.27)
-        time.sleep(1)
-        robot.gripper_close()
+    robot.move_z(0.27)
+    time.sleep(1)
+    robot.gripper_close()
 
-    # print("Tool grabbed successfully!", flush=True)
     try: 
         robot.move_z(1.0)
         time.sleep(1.0)
@@ -161,18 +153,29 @@ try:
             # Define color range for tool detection (example: white tool in BGR)
             lower_bgr = (160, 160, 120)
             upper_bgr = (190, 210, 190)
-            grip_quality = analyze_tool_grip(roi_img, (lower_bgr, upper_bgr))
-            print(f"Tool grip quality: {grip_quality:.2f}")
-            threshold = 0.55
-        
-            if grip_quality < threshold:
-                print("Tool not detected properly in hand. Please adjust tool and restart.")
+            if check_tool_grasp:
+                grip_quality = analyze_tool_grip(roi_img, (lower_bgr, upper_bgr))
             else:
-                print("Tool grip verified successfully!", flush=True)    
-            
+                grip_quality = 0.0
+            return grip_quality
     except Exception as e:
-        print(f"Error during tool detection: {e}")
+        print(f"Error during tool grasping: {e}")
+    return 0.0
+
+# Move robot to specific position and grab tool
+try:
+    # Start camera thread to visualize and record
+    time.sleep(1)
+    camera_thread = threading.Thread(target=update_camera, daemon=True)
+    camera_thread.start()
+    grip_quality = perform_grab_tool(robot, check_tool_grasp=True)
+    print(f"Tool grip quality: {grip_quality:.2f}")
+    threshold = 0.55
     
+    if grip_quality < threshold:
+        print("Tool not detected properly in hand. Please adjust tool and restart.")
+    else:
+        print("Tool grip verified successfully!", flush=True)    
     
 
 except KeyboardInterrupt:
@@ -184,3 +187,4 @@ finally:
         camera_thread.join()
     cv2.destroyAllWindows()
     print("Cleanup done, exiting.")
+

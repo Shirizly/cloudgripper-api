@@ -22,9 +22,11 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 from client.cloudgripper_client import GripperRobot
-from library.utils import get_undistorted_bottom_image
+from autograsper.library.utils import get_undistorted_bottom_image
 from object_tracker.granular_utils import process_image, crop_center_region
 from object_tracker.base_tool_tracker import find_thin_tool_center
+from autograsper.custom_graspers.fence_utils import PixelRobotTransform
+from sklearn.mixture import GaussianMixture
 
 # Load environment variables
 load_dotenv()
@@ -60,6 +62,7 @@ if os.path.exists("homography_matrix.npy"):
     H = np.load("homography_matrix.npy")
 
 reference_empty = cv2.imread("reference_empty_base.jpg")
+cropped_reference_empty = cv2.imread("cropped_reference.png")
 # src_pts = [(33,162), (236,164), (236,372), (32,368)]  # Example source points
 # scaling = 240
 # dst_pts = [(0,0), (scaling,0), (scaling,scaling), (0,scaling)]  # Example destination points
@@ -70,9 +73,11 @@ reference_empty = cv2.imread("reference_empty_base.jpg")
 
 # Function to update camera feed
 def update_camera():
-    global running, current_config, calibration_flag, save_img, reference_empty, calibration_dict
+    global running, current_config, calibration_flag, save_img, reference_empty, calibration_dict, cropped_reference_empty
     out = None
     prev_center_np = np.array([1,1])
+    pixTransH = np.load("homography.npz")['arr_0'] if os.path.exists("homography.npz") else None
+    pixel_robot_transform = PixelRobotTransform(pixTransH) if pixTransH is not None else None
     while running:
         with lock:
             # Get images from both cameras
@@ -154,21 +159,65 @@ def update_camera():
             out.write(frame)
         # 
         t_start = time.time()
-        # process_image(img_base, reference_empty, scale_factor=4, min_size=400)  # for chickpeas
         cropped_image = crop_center_region(img_base)
+        mask,_,_,_ = process_image(img_base, reference_empty, scale_factor=4, min_size=400)  # for chickpeas
+        masked_image = cv2.bitwise_and(cropped_image, cropped_image, mask=mask)
+        # analyze masked image to find color gaussian peaks
+        def get_color_gaussians(masked_image, num_gaussians=3):
+            """
+            Fit Gaussian distributions to the dominant colors in a masked image.
+            Returns a list of Gaussians ordered by dominance (weight).
+            """
+            
+            # Reshape image to list of pixels
+            pixels = masked_image.reshape(-1, 3).astype(np.float32)
+            
+            # Remove black pixels (background)
+            non_black = pixels[np.any(pixels > 10, axis=1)]
+            
+            if len(non_black) < num_gaussians:
+                return []
+            
+            # Fit Gaussian Mixture Model
+            gmm = GaussianMixture(n_components=num_gaussians, random_state=42)
+            gmm.fit(non_black)
+            
+            # Sort by weight (dominance)
+            sorted_indices = np.argsort(-gmm.weights_)
+            
+            gaussians = []
+            for idx in sorted_indices:
+                gaussians.append({
+                    'mean': gmm.means_[idx],
+                    'covariance': gmm.covariances_[idx],
+                    'weight': gmm.weights_[idx]
+                })
+            
+            return gaussians
+
+        # color_gaussians = get_color_gaussians(masked_image, num_gaussians=4)
+        # print("Detected color gaussians (most to least dominant):")
+        # for i, g in enumerate(color_gaussians):
+        #     mean_color = g['mean']
+        #     weight = g['weight']
+        #     covariance = g['covariance']
+        #     print(f"  Gaussian {i+1}: Mean Color (BGR) = {mean_color}, covariance = {covariance}, Weight = {weight:.4f}") 
+        #     # visualize gaussians on image
+        #     cv2.circle(cropped_image, (i*10+20,i*10+20), 10, (int(mean_color[0]), int(mean_color[1]), int(mean_color[2])), -1)
         cv2.imwrite("latest_manual_base_cropped.png", cropped_image)
-        center,_,_ = find_thin_tool_center(cropped_image,current_config[3]-90,3,112,2)
+        # center,_,_ = find_thin_tool_center(cropped_image,current_config[3]-90,3,112,2)
+        center = pixel_robot_transform.robot_to_pix(current_config[0], current_config[1]) if pixel_robot_transform is not None else (0,0)
         t_end = time.time()
         x,y = center
         center_np = np.array([x,y])
         # print(f"Image processed in {t_end - t_start:.2f} seconds.", flush=True)
-        if np.linalg.norm(center_np-prev_center_np)>1:
-            print(center)
-            prev_center_np = center_np
+        # if np.linalg.norm(center_np-prev_center_np)>1:
+        #     print(center)
+        #     prev_center_np = center_np
         
         # Display images
-        cv2.circle(cropped_image, (x, y), 6, (0, 0, 255), -1)
-        update_images([cropped_image, img_top], window_name="Robot Cameras")  # Display images side by side
+        # cv2.circle(masked_image, (x, y), 6, (0, 0, 255), -1)
+        update_images([cropped_image, masked_image], window_name="Robot Cameras")  # Display images side by side
 
         
         # Check if window is closed

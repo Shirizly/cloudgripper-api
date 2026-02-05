@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from client.cloudgripper_client import GripperRobot
-from library.calibration import undistort
+from .calibration import undistort
 
 
 class OrderType(Enum):
@@ -28,7 +28,7 @@ def write_order(
     Save the previous order to the orders.json file.
 
     :param output_dir: Directory to save order data
-    :param start_time: The start time of the autograsper process
+    :param order_time: The time the order was executed
     :param previous_order: The previous order executed by the robot
     """
     if previous_order is None:
@@ -81,7 +81,6 @@ def execute_order(
 
     try:
         order_type, order_value = order
-
         if order_type == OrderType.ROTATE:
             order_value[0] = int(order_value[0])
         else:
@@ -171,6 +170,9 @@ def queue_orders_with_input(
                 input("Press Enter to execute...")
             elif order_type == OrderType.GRIPPER_CLOSE:
                 print("Intended command: Gripper Close")
+                input("Press Enter to execute...")
+            elif order_type == OrderType.ROTATE:
+                print(f"Intended command: Rotate to {order_value[0]}")
                 input("Press Enter to execute...")
 
             execute_order(robot, order, output_dir)

@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from library.bottom_image_preprocessing import rotate
+from .bottom_image_preprocessing import rotate
 
 
 def calibrate_fisheye(images, pattern_size, square_size, increase_contrast=False):
@@ -19,18 +19,50 @@ def calibrate_fisheye(images, pattern_size, square_size, increase_contrast=False
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         if increase_contrast:
             # if needed, enhance contrast for better corner detection
-            alpha = 1.8   # contrast control
-            beta = 40    # brightness control
+            alpha = 1.5   # contrast control
+            beta = 2    # brightness control
             gray = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
+            # clahe = cv2.createCLAHE(
+            #     clipLimit=2.0,
+            #     tileGridSize=pattern_size
+            # )
+            # gray = clahe.apply(gray)    
 
-        ret, corners = cv2.findChessboardCorners(gray, pattern_size, None)
+
+        flags = (
+            cv2.CALIB_CB_ADAPTIVE_THRESH |
+            cv2.CALIB_CB_NORMALIZE_IMAGE
+        )
+        cv2.imshow("enhanced Image for Calibration", gray)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        ret, corners = cv2.findChessboardCorners(
+            gray,
+            patternSize=pattern_size,
+            flags=flags
+        )
+        # ret, corners = cv2.findChessboardCorners(gray, pattern_size, None)
 
         if ret:
             obj_points.append(objp)
             corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
             img_points.append(corners2)
+        else:
+            print("Chessboard corners not found in one of the images.")
+    
+    vis = img.copy()
+    cv2.drawChessboardCorners(
+        vis,
+        pattern_size,
+        corners,
+        ret
+    )
 
-    ret, mtx, dist, rvecs, tvecs = cv2.fisheye.calibrate(
+    # Display
+    cv2.imshow("Detected corners", vis)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
         obj_points, img_points, gray.shape[::-1], None, None
     )
     return ret, mtx, dist, rvecs, tvecs

@@ -89,7 +89,7 @@ class DataCollectionCoordinator:
                         # bottom_img_np = np.transpose(bottom_img_np, (1, 0, 2))
 
                         update_images(
-                            [top_img_np, bottom_img_np],
+                            [bottom_img_np, top_img_np],
                             window_name="Live Robot Feed"
                         )
                         cv2.waitKey(1)
