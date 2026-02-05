@@ -4,6 +4,7 @@ import time
 from enum import Enum
 from typing import Any, List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 from client.cloudgripper_client import GripperRobot
@@ -304,17 +305,26 @@ def get_undistorted_bottom_image_old(
     image, _ = robot.get_image_base()
     return undistort(image, m, d)
 
-def get_undistorted_bottom_image(image, m: np.ndarray, d: np.ndarray
+def get_undistorted_bottom_image(image,
+     m: np.ndarray, d: np.ndarray, H: np.ndarray = None
 ) -> np.ndarray:
     """
     Get an undistorted image from the robot's camera.
 
-    :param image: the image to undistort
+    :param robot: The robot to capture the image
     :param m: Camera matrix for undistortion
     :param d: Distortion coefficients
     :return: An undistorted image
     """
-    return undistort(image, m, d)
+    fish_eye_undistorted = undistort(image, m, d)
+    if H is not None:
+        undistorted = cv2.warpPerspective(
+            fish_eye_undistorted,
+            H,
+            (fish_eye_undistorted.shape[1], fish_eye_undistorted.shape[0]),
+        )
+        return undistorted
+    return fish_eye_undistorted
 
 def run_calibration(height, robot):
     robot.gripper_close()

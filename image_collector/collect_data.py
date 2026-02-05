@@ -15,13 +15,13 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 from client.cloudgripper_client import GripperRobot
-
+from library.utils import get_undistorted_bottom_image
 # some settings for the session
-save_image_top = True
+save_image_top = False
 save_image_base = True
 
-bounds = [(0.1, 0.9), (0.1, 0.9),(0.3, 0.9)]  # Define the space
-base_resolution = 2 # Base resolution of the grid
+bounds = [(0.0, 1.0), (0.0, 1.0)]  # Define the space
+base_resolution = 10 # Base resolution of the grid
 N = 1  # Number of sub-grids to generate
 
 # load session variables from session_initializer.py
@@ -42,10 +42,10 @@ print(f"Initial state: {current_config}")
 # some utility functions
 def initialize_robot_configuration(robot): # function for initializing robot position
     actions = [
-        lambda: robot.move_z(0.8),
+        lambda: robot.move_z(1.0),
         lambda: robot.gripper_close(),
-        lambda: robot.rotate(0),
-        lambda: robot.move_xy(0, 0),
+        # lambda: robot.rotate(0),
+        # lambda: robot.move_xy(0, 0),
     ]
     for action in actions:
         action()
@@ -69,6 +69,12 @@ base_wait_time = 2  # Initial wait time in seconds
 
 sleep_time = 0.5
 
+camera_matrix = np.array([[505.24537524391866, 0.0, 324.5096286632362],
+    [0.0, 505.6456651337437, 233.54118730278543],
+    [0.0, 0.0, 1.0]])
+
+distortion_coeffs = np.array([-0.07727407195057368, -0.047989733519315944, 0.12157420705123315, -0.09667542135039282])
+H = np.load("homography_matrix.npy")
 # Open the log file for writing
 with open(log_file, "a") as file:
     # Execute actions and capture images after each action
@@ -76,16 +82,16 @@ with open(log_file, "a") as file:
     for image_count, position in enumerate(sub_grid):
         robot.move_xy(position[0].item(),position[1].item()) # Perform the action
         time.sleep(sleep_time)  # Wait a bit for the action to complete
-        robot.move_z(position[2].item())
-        time.sleep(sleep_time)
-        robot.rotate(random.randint(0, 360))
-        time.sleep(sleep_time)
-        if random.random() > 0.5: # Randomly switch gripper state half the time (on average)
-            if current_config[4] > 0.5: # Check if the gripper is open
-                robot.gripper_close()
-            else:
-                robot.gripper_open()
-            time.sleep(sleep_time)  # Wait a bit for the actions to complete
+        # robot.move_z(position[2].item())
+        # time.sleep(sleep_time)
+        # robot.rotate(random.randint(0, 360))
+        # time.sleep(sleep_time)
+        # if random.random() > 0.5: # Randomly switch gripper state half the time (on average)
+        #     if current_config[4] > 0.5: # Check if the gripper is open
+        #         robot.gripper_close()
+        #     else:
+        #         robot.gripper_open()
+        #     time.sleep(sleep_time)  # Wait a bit for the actions to complete
 
         retry_count = 0  # Track retry attempts
         while retry_count < max_retries:
@@ -97,6 +103,9 @@ with open(log_file, "a") as file:
             # time.sleep(sleep_time)  # Wait a bit for the api to chill
             # state = robot.get_state()
             # time.sleep(sleep_time)  # Wait a bit for the api to chill
+            image_base = get_undistorted_bottom_image(
+                    image_base, camera_matrix, distortion_coeffs, H
+                )
             
             # Check if any of the retrieved data is empty
             if (

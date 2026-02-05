@@ -38,7 +38,7 @@ def update_images(images, window_name="Robot Images"):
 
     # Resize all images to the same height, maintaining aspect ratio
     # target_height = min(height0, height1)
-    target_height = 400
+    target_height = images[0].shape[0]*2  # double the height of first image
     resized_images = []
     for image in images:
         aspect_ratio = image.shape[1] / image.shape[0]
@@ -52,3 +52,4 @@ def update_images(images, window_name="Robot Images"):
 
     # Display the image
     cv2.imshow(window_name, concatenated_image)
+    cv2.waitKey(10)  # Small delay to allow image to render

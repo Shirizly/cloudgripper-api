@@ -6,6 +6,14 @@
 **/__pycache__/
 **.hdf5
 **.env
+*.png
+*.yaml
+*.log
+*.npz
+*.npy
+*.json
+*.jpeg
+
 
 library/__pycache__/__init__.cpython-38.pyc
 library/__pycache__

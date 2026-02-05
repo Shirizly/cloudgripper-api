@@ -13,8 +13,19 @@ from custom_graspers.random_push_grasper import RandomPushGrasper
 from utils import load_config
 
 
+import sys
+import traceback
+
+def thread_exception_handler(args):
+    print("\n🔥 Unhandled thread exception")
+    print(f"Thread: {args.thread.name}")
+    traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback)
+    sys.exit(1)   # hard crash so you SEE it
+
+
+
 # Configure logging.
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s: %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
 # Create the Flask application.
 app = Flask(__name__)
@@ -58,8 +69,8 @@ def generate_frames():
 
 def main():
     global global_coordinator
-
-    config_path = os.path.join(os.getcwd(), "autograsper", "backgammon-config.yaml")
+    threading.excepthook = thread_exception_handler
+    config_path = os.path.join(os.getcwd(), "autograsper", "chickpeas-config.yaml")
     # config_path = os.path.join(os.getcwd(), "backgammon-config.yaml")
     config = load_config(config_path)
     shutdown_event = threading.Event()

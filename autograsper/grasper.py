@@ -13,6 +13,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
+
 from client.cloudgripper_client import GripperRobot
 import library.utils as utils
 
@@ -42,8 +43,7 @@ class AutograsperBase(ABC):
         if shutdown_event is None:
             raise ValueError("shutdown_event must be provided")
         self.shutdown_event = shutdown_event
-
-        self.bottom_image = None
+        self.shared_state = None  # to be set in coordinator
 
         self.token = os.getenv("CLOUDGRIPPER_TOKEN")
         if not self.token:
@@ -79,6 +79,9 @@ class AutograsperBase(ABC):
             ) from e
 
         self.robot = self.initialize_robot()
+
+    def connect_shared_state(self, shared_state):
+        self.shared_state = shared_state
 
     def initialize_robot(self) -> GripperRobot:
         try:
@@ -186,7 +189,7 @@ class AutograsperBase(ABC):
             time_between_orders = self.time_between_orders
 
         for order in order_list:
-            print(f"Executing order: {order}")
+            # print(f"Executing order: {order}")
             if self.shutdown_event.is_set():
                 break
             self.execute_order(order, output_dir, reverse_xy)

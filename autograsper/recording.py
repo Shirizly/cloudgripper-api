@@ -22,14 +22,19 @@ logger = logging.getLogger(__name__)
 class Recorder:
     FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 
-    def __init__(self, config: Any, output_dir: str, shutdown_event: threading.Event):
+    def __init__(self, config: Any, output_dir: str, shutdown_event: threading.Event, shared_state: Any):
         self.shutdown_event = shutdown_event
+        self.shared_state = shared_state
 
         try:
             camera_config = config["camera"]
             experiment_config = config["experiment"]
             self.camera_matrix = np.array(camera_config["m"])
             self.distortion_coeffs = np.array(camera_config["d"])
+            print("Camera Matrix:", self.camera_matrix)
+            print("Distortion Coefficients:", self.distortion_coeffs)
+            
+            self.H_matrix = np.array(camera_config["H"])
             self.record_only_after_action = bool(
                 camera_config["record_only_after_action"]
             )
@@ -54,6 +59,8 @@ class Recorder:
 
         self.image_top: Optional[np.ndarray] = None
         self.bottom_image: Optional[np.ndarray] = None
+        self.bottom_image_raw: Optional[np.ndarray] = None
+        self.save_bottom_raw = bool(camera_config.get("save_bottom_raw", False))
         self.pause = False
 
         # For when record_only_after_action is True.
@@ -71,18 +78,22 @@ class Recorder:
         self.video_counter = 0
         self.video_writer_top: Optional[cv2.VideoWriter] = None
         self.video_writer_bottom: Optional[cv2.VideoWriter] = None
+        self.disk_enabled = False # no saving images/videos on startup, not advancing counters
 
-        self._initialize_directories()
+
 
     def _initialize_directories(self) -> None:
+        logger.info(f"_initialize_directories called. save_images_individually={self.save_images_individually}")
         if self.save_images_individually:
             self.output_images_dir, self.output_bottom_images_dir = (
                 FileManager.create_image_dirs(self.output_dir)
             )
+            logger.info(f"Created image directories: {self.output_images_dir}, {self.output_bottom_images_dir}")
         else:
             self.output_video_dir, self.output_bottom_video_dir = (
                 FileManager.create_video_dirs(self.output_dir)
             )
+            logger.info(f"Created video directories: {self.output_video_dir}, {self.output_bottom_video_dir}")
 
     def _start_new_video(
         self,
@@ -121,7 +132,7 @@ class Recorder:
                         continue
 
                     if (not self.record_only_after_action) or (self.take_snapshot > 0):
-                        if self.save_data:
+                        if self.save_data and self.disk_enabled:
                             self._capture_frame()
                         if (
                             self.clip_length
@@ -133,7 +144,7 @@ class Recorder:
                             self._start_or_restart_video_writers()
                         # Use shutdown_event.wait to allow prompt shutdown.
                         self.shutdown_event.wait(1 / self.FPS)
-                        if self.save_data:
+                        if self.save_data and self.disk_enabled:
                             self.save_state()
                         self.frame_counter += 1
                     else:
@@ -152,11 +163,18 @@ class Recorder:
             data = self.robot.get_all_states()
             with self.image_lock:
                 self.image_top = data[0]
+                if self.save_bottom_raw:
+                    self.bottom_image_raw = data[1]
                 self.bottom_image = get_undistorted_bottom_image(
-                    data[1], self.camera_matrix, self.distortion_coeffs
+                    data[1], self.camera_matrix, self.distortion_coeffs, self.H_matrix
                 )
             self.state = data[2]
             self.timestamp = data[3]
+            with self.shared_state.image_lock:
+                self.shared_state.latest_top_image = self.image_top
+                self.shared_state.latest_bottom_image = self.bottom_image
+                self.shared_state.latest_robot_state = data[2]
+                self.shared_state.timestamp = data[3]
         except Exception as e:
             logger.exception("Error updating images/state:", e)
             raise
@@ -169,8 +187,10 @@ class Recorder:
             with self.image_lock:
                 top_image = self.image_top.copy()
                 bottom_image = self.bottom_image.copy()
+                if self.bottom_image_raw is not None:
+                    bottom_image_raw = self.bottom_image_raw.copy()
             if self.save_images_individually:
-                self._save_individual_images(top_image, bottom_image)
+                self._save_individual_images(top_image, bottom_image, bottom_image_raw)
             else:
                 with self.writer_lock:
                     if (
@@ -191,8 +211,7 @@ class Recorder:
                         self.snapshot_cond.notify_all()
 
     def _save_individual_images(
-        self, top_image: np.ndarray, bottom_image: np.ndarray
-    ) -> None:
+        self, top_image: np.ndarray, bottom_image: np.ndarray, bottom_image_raw: np.ndarray = None) -> None:
         """Save the top and bottom images as individual JPEG files."""
         try:
             top_filename = os.path.join(
@@ -201,6 +220,11 @@ class Recorder:
             bottom_filename = os.path.join(
                 self.output_bottom_images_dir, f"image_bottom_{self.frame_counter}.jpeg"
             )
+            if bottom_image_raw is not None:
+                bottom_raw_filename = os.path.join(
+                    self.output_bottom_images_dir, f"image_bottom_raw_{self.frame_counter}.jpeg"
+                )
+                cv2.imwrite(bottom_raw_filename, bottom_image_raw)
             cv2.imwrite(top_filename, top_image)
             cv2.imwrite(bottom_filename, bottom_image)
         except Exception as e:
@@ -227,15 +251,27 @@ class Recorder:
 
     def start_new_recording(self, new_output_dir: str) -> None:
         """Start a new recording session in the specified directory."""
-        self.output_dir = new_output_dir
-        self._initialize_directories()
-        self._prepare_new_recording()
-        logger.info("Started new recording in directory: %s", new_output_dir)
+        logger.info(f"start_new_recording called with: {new_output_dir}")
+        if not new_output_dir:
+            logger.error(f"start_new_recording called with empty output_dir! This is a critical error.")
+            raise ValueError("start_new_recording called with empty output_dir")
+        try:
+            self.output_dir = new_output_dir
+            self.disk_enabled = True
+            self.frame_counter = 0
+            self.video_counter = 0
+            logger.info(f"disk_enabled set to True. Calling _initialize_directories()")
+            self._initialize_directories()
+            self._prepare_new_recording()
+            logger.info("Started new recording in directory: %s", new_output_dir)
+        except Exception as e:
+            logger.error(f"Exception in start_new_recording: {e}", exc_info=True)
+            raise
 
     def _prepare_new_recording(self) -> None:
         """Prepare for a new recording session."""
         self.stop_flag = False
-        if not self.save_images_individually:
+        if self.disk_enabled and not self.save_images_individually:
             self._start_or_restart_video_writers()
 
     def stop(self) -> None:

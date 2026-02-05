@@ -4,7 +4,7 @@ import numpy as np
 from library.bottom_image_preprocessing import rotate
 
 
-def calibrate_fisheye(images, pattern_size, square_size):
+def calibrate_fisheye(images, pattern_size, square_size, increase_contrast=False):
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
     obj_points = []  # 3D points in real world space
     img_points = []  # 2D points in image plane
@@ -17,6 +17,12 @@ def calibrate_fisheye(images, pattern_size, square_size):
 
     for img in images:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        if increase_contrast:
+            # if needed, enhance contrast for better corner detection
+            alpha = 1.8   # contrast control
+            beta = 40    # brightness control
+            gray = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
+
         ret, corners = cv2.findChessboardCorners(gray, pattern_size, None)
 
         if ret:
@@ -58,12 +64,18 @@ def undistort(img_path, K, D):
     img = img_path
     K, D = np.array(K), np.array(D)
     h, w = img.shape[:2]
-    map1, map2 = cv2.fisheye.initUndistortRectifyMap(
-        K, D, np.eye(3), K, img.shape[:2][::-1], cv2.CV_16SC2
-    )
-    undistorted_img = cv2.remap(
-        img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT
-    )
+    if D.__len__() == 4:
+        map1, map2 = cv2.fisheye.initUndistortRectifyMap(
+            K, D, np.eye(3), K, img.shape[:2][::-1], cv2.CV_16SC2
+        )
+        undistorted_img = cv2.remap(
+            img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT
+        )
+    else:
+        new_K, roi = cv2.getOptimalNewCameraMatrix(K, D, (w, h), 1, (w, h))
+        undistorted_img = cv2.undistort(img, K, D, None, new_K)
+        x, y, w, h = roi
+        undistorted_img = undistorted_img[y : y + h, x : x + w]
     # undistorted_img = cv2.flip(undistorted_img, 1)
     undistorted_img = cv2.flip(undistorted_img, 0)
     undistorted_img = rotate(undistorted_img, 90)
