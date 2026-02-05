@@ -238,7 +238,7 @@ def check_reset_needed(mask):
         occupied_area = cv2.countNonZero(cv2.bitwise_and(mask, workspace_mask))
 
         occupancy_ratio = occupied_area / mask_area
-        threshold = 0.3  # e.g., if less than 30% of mask is in the main workspace, needs resetting
+        threshold = 0.5  # e.g., if less than 50% of mask is in the main workspace, needs resetting
         if occupancy_ratio < threshold:
             print(f"Main workspace needs reset: occupancy ratio {occupancy_ratio:.2f}")
             return True

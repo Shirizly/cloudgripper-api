@@ -189,6 +189,7 @@ class RandomPushGrasper(AutograsperBase):
 
         self.queue_orders(orders, time_between_orders=1)
         self.update_robot_state()
+        self.interaction_since_last_mask = True
 
     def check_tool_grip(self):
         with self.shared_state.image_lock:
