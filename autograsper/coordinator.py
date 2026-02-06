@@ -4,6 +4,7 @@ import logging
 import time
 import concurrent.futures
 import threading
+import gc
 from dataclasses import dataclass, field
 from queue import Queue, Empty
 import numpy as np
@@ -22,10 +23,12 @@ class SharedState:
     """
     Holds shared references between threads.
     """
-    state: str = RobotActivity.STARTUP
+    state = RobotActivity.STARTUP
     latest_top_image: np.ndarray | None = None
     latest_bottom_image: np.ndarray | None = None
     latest_robot_state: dict | None = None
+    latest_mask: np.ndarray | None = None
+    latest_mask_saved: bool = False
     timestamp: float | None = None
     image_lock: threading.RLock = field(default_factory=threading.RLock)
 
@@ -49,7 +52,9 @@ class DataCollectionCoordinator:
         # Message queue for non-UI messages.
         self.msg_queue = Queue()
         # Separate UI queue so that image updates can be handled in the main thread.
-        self.ui_queue = Queue()
+        # Limit to 2 frames to prevent unbounded memory growth
+        self.ui_queue = Queue(maxsize=2)
+        self.last_gc_time = time.time()
 
 
         # Read configuration with explicit error handling.
@@ -94,11 +99,25 @@ class DataCollectionCoordinator:
                         )
                         cv2.waitKey(1)
                     if bottom_img is not None:
-                        ui_msg = {"type": "image_update", "image": bottom_img.copy()}
-                        self.ui_queue.put(ui_msg)
+                        # Drop old frames if queue is full to prevent memory buildup
+                        try:
+                            ui_msg = {"type": "image_update", "image": bottom_img.copy()}
+                            self.ui_queue.put(ui_msg, block=False)
+                        except:
+                            # Queue full, drop the oldest frame and try again
+                            try:
+                                self.ui_queue.get_nowait()
+                                self.ui_queue.put(ui_msg, block=False)
+                            except:
+                                pass  # Skip this frame if we still can't queue it
                         # TODO make this safe against race conditions
                         # push latest robot state to autograsper for use in grasper logic, this is legacy from before shared_state
                         self.autograsper.robot_state = self.shared_state.latest_robot_state
+                        # Periodically run garbage collection (every 5 seconds)
+                        current_time = time.time()
+                        if current_time - self.last_gc_time > 5.0:
+                            gc.collect()
+                            self.last_gc_time = current_time
                 self.shutdown_event.wait(timeout=0.1)
             except Exception as e:
                 logger.exception("Error in state monitoring: %s", e)
@@ -152,10 +171,12 @@ class DataCollectionCoordinator:
 
     def _on_state_transition(self, old_state, new_state):
         if new_state == RobotActivity.STARTUP and old_state != RobotActivity.STARTUP:
+            logger.info(f"Transitioning to STARTUP state, disabling disk saving")
             if self.recorder:
-                self.recorder.pause = True
-                time.sleep(self.timeout_between_experiments)
-                self.recorder.pause = False
+                self.recorder.disable_recording()
+            self.recorder.pause = True
+            time.sleep(self.timeout_between_experiments)
+            self.recorder.pause = False
 
     def _create_new_data_point(self):
         base_dir = os.path.join(

@@ -119,7 +119,7 @@ def create_chickpea_mask(image: np.ndarray, threshold: int = 0.000001) -> np.nda
     return chickpea_mask
         
 
-def clean_occupancy_mask(mask: np.ndarray, kernel_size: int = 3, min_size: int = 300) -> np.ndarray:
+def clean_occupancy_mask(mask: np.ndarray, kernel_size: int = 3, min_size: int = 300) -> tuple[np.ndarray, int, cv2.typing.MatLike, cv2.typing.MatLike]:
     """
     Clean occupancy mask using morphological operations.
     
@@ -240,7 +240,7 @@ def generate_clump_hierarchy(mask: np.ndarray, scales: List[int] = None) -> List
 
 
 def process_image(image: np.ndarray, reference_empty: np.ndarray, 
-                  scale_factor: int = 4, min_size: int = 300, crop_size = (360, 360), crop_center=(275, 200)) -> Tuple[np.ndarray, List[Dict], np.ndarray]:
+                  scale_factor: int = 4, min_size: int = 300, crop_size = (360, 360), crop_center=(275, 200)) -> Tuple[np.ndarray, int ,cv2.typing.MatLike, cv2.typing.MatLike]:
     """
     Complete pipeline: mask, downscale, and detect clumps.
     

@@ -17,7 +17,7 @@ import sys
 import traceback
 
 def thread_exception_handler(args):
-    print("\n🔥 Unhandled thread exception")
+    print("\n Unhandled thread exception")
     print(f"Thread: {args.thread.name}")
     traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback)
     sys.exit(1)   # hard crash so you SEE it
@@ -75,7 +75,7 @@ def main():
     config = load_config(config_path)
     shutdown_event = threading.Event()
     grasper = RandomPushGrasper(config, shutdown_event=shutdown_event, N_pushes=10)
-    global_coordinator = DataCollectionCoordinator(config, grasper, shutdown_event, visualize=True)
+    global_coordinator = DataCollectionCoordinator(config, grasper, shutdown_event, visualize=False)
     global_coordinator.start()
 
     try:

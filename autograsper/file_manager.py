@@ -31,6 +31,8 @@ class FileManager:
     def create_image_dirs(output_dir: str):
         image_dir = os.path.join(output_dir, "Images")
         bottom_image_dir = os.path.join(output_dir, "Bottom_Images")
+        mask_dir = os.path.join(output_dir, "Masks")
         FileManager.create_dir(image_dir)
         FileManager.create_dir(bottom_image_dir)
-        return image_dir, bottom_image_dir
+        FileManager.create_dir(mask_dir)
+        return image_dir, bottom_image_dir, mask_dir

@@ -1,6 +1,7 @@
 # custom_graspers/random_push_grasper.py
 import logging
 from matplotlib.pyplot import flag
+from autograsper.coordinator import SharedState
 from grasper import AutograsperBase, RobotActivity, sleep_with_shutdown
 import numpy as np
 import time
@@ -66,7 +67,7 @@ class RandomPushGrasper(AutograsperBase):
         self.shared_state = None  # to be set by coordinator
         self.state = RobotActivity.STARTUP
 
-    def connect_shared_state(self, shared_state):
+    def connect_shared_state(self, shared_state: 'SharedState'):
         self.shared_state = shared_state
 
     def update_robot_state(self):
@@ -110,6 +111,8 @@ class RandomPushGrasper(AutograsperBase):
         try:
             mask, num_clumps, stats, centroids = process_image(bottom_img, self.reference_image)
             self.latest_mask = mask
+            self.shared_state.latest_mask = mask
+            self.shared_state.latest_mask_saved = False
             self.latest_num_clumps = num_clumps
             self.latest_stats = stats
             self.latest_centroids = centroids
@@ -339,7 +342,7 @@ class RandomPushGrasper(AutograsperBase):
         """
         
         reset_needed, details = check_wall_reset_needed(
-            self.latest_mask, wall, self.latest_stats,
+            self.latest_mask, wall,
             self.image_space_tool_dimensions,
             self.min_granule_size
         )
@@ -420,7 +423,7 @@ class RandomPushGrasper(AutograsperBase):
         ])
         self.interaction_since_last_mask = True
         
-        self.queue_orders(order, time_between_orders=0.5)
+        self.queue_orders(order, time_between_orders=0.8)
 
 
     def reset_task(self):

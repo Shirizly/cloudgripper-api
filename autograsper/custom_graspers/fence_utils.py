@@ -145,7 +145,12 @@ def check_placement(dist, tool_mask, cx, cy, r):
     if overlap:
         return False, 0.0
 
-    clearance = np.min(local_dist[local_mask == 1])
+    # Guard against empty selection
+    mask_pixels = local_dist[local_mask == 1]
+    if mask_pixels.size == 0:
+        return False, 0.0
+    
+    clearance = np.min(mask_pixels)
     return True, clearance
 
 def make_tool_mask(w_px, h_px, angle_deg):
@@ -167,6 +172,35 @@ def make_tool_mask(w_px, h_px, angle_deg):
 def in_region_pix(x, y, region):
     (xmin, xmax), (ymin, ymax) = region
     return xmin <= x <= xmax and ymin <= y <= ymax
+
+
+def visualize_mask_overlap(obstacle_mask, tool_mask, pos_px, angle):
+    r = tool_mask.shape[0] // 2
+    canvas = cv2.cvtColor(obstacle_mask*255, cv2.COLOR_GRAY2BGR)
+    tool_vis = cv2.cvtColor(tool_mask*255, cv2.COLOR_GRAY2BGR)
+    tool_vis[np.where((tool_vis==[255,255,255]).all(axis=2))] = [0,0,255] # red for tool
+    ys = slice(pos_px[1] - r, pos_px[1] + r + 1)
+    xs = slice(pos_px[0] - r, pos_px[0] + r + 1)
+
+    # Clip slices to valid bounds
+    y_start = max(0, ys.start)
+    y_stop = min(canvas.shape[0], ys.stop)
+    x_start = max(0, xs.start)
+    x_stop = min(canvas.shape[1], xs.stop)
+
+    # Calculate offsets in the tool mask for clipped region
+    y_offset = y_start - (pos_px[1] - r)
+    x_offset = x_start - (pos_px[0] - r)
+
+    canvas[y_start:y_stop, x_start:x_stop] = cv2.addWeighted(
+        canvas[y_start:y_stop, x_start:x_stop], 0.7,
+        tool_vis[y_offset:y_offset + (y_stop - y_start), x_offset:x_offset + (x_stop - x_start)], 0.3,
+        0
+    )
+    cv2.imshow(f"Placement at angle {angle} degrees", canvas)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
 
 def find_tool_placements(
     obstacle_mask,
@@ -199,7 +233,7 @@ def find_tool_placements(
             ok, clearance = check_placement(dist, tool_mask, cx, cy, r)
             if not ok:
                 continue
-
+            
             placements.append({
                 "pos_px": (cx, cy),
                 "angle": angle,
@@ -213,15 +247,16 @@ def find_tool_placements(
     if not placements:
         return {}
     placements.sort(key=lambda p: -p["clearance_px"])
+    # visualize_mask_overlap(obstacle_mask, tool_mask, placements[0]["pos_px"], placements[0]["angle"])
     return placements[0]
 
 
-def check_wall_reset_needed(mask, wall: Wall, stats, image_space_tool_dimensions, min_granule_size, margin_of_safety = 0.03):
+def check_wall_reset_needed(mask, wall: Wall, image_space_tool_dimensions, min_granule_size, margin_of_safety = 0.03):
     """
     Identify regions along the wall where mask 1s are sufficiently far from the wall.
     Returns (reset_needed, details) where details contains optimal position info.
     """
-    if mask is None or stats is None:
+    if mask is None:
         return False, {}
     
     h, w = mask.shape
@@ -230,8 +265,6 @@ def check_wall_reset_needed(mask, wall: Wall, stats, image_space_tool_dimensions
 
     tool_angle = np.rad2deg(np.arctan2(wall_normal[1], wall_normal[0]))  # degrees
     tool_angle = tool_angle % 360 # tool is vertical at 0 degrees, but mask generation corrects for this
-
-
 
     mask_area = cv2.countNonZero(mask)
     if mask_area == 0:
@@ -258,16 +291,17 @@ def check_wall_reset_needed(mask, wall: Wall, stats, image_space_tool_dimensions
     band_mask = np.zeros_like(mask, dtype=np.uint8)
     cv2.rectangle(band_mask, tuple(np.clip(corners[0], 0, [w-1, h-1])), tuple(np.clip(corners[2], 0, [w-1, h-1])), 255, thickness=-1)
     
-    # Calculate occupancy in the band
+    # check size of band area
     band_area = cv2.countNonZero(band_mask)
     if band_area == 0:
         return False, {}
-    
+    # Calculate occupancy in the band
     occupied_area = cv2.countNonZero(cv2.bitwise_and(mask, band_mask))
     cv2.imwrite(f'band mask and mask at {wall.label}.png',cv2.bitwise_and(mask, band_mask))
     # If occupancy ratio exceeds threshold, reset is needed
     threshold = 0.1  # if more than 10% of mask is in the band, needs sweeping
     occupancy_ratio = occupied_area / mask_area
+    print(f"Wall {wall.label}: occupancy ratio in band = {occupancy_ratio:.2f}")
     if occupancy_ratio <= threshold:
         return False, {}
     
@@ -299,44 +333,60 @@ def check_wall_reset_needed(mask, wall: Wall, stats, image_space_tool_dimensions
 
 
     # Scan along wall and find regions far enough from masked obstacles
-    free_region = find_tool_placements(mask,[tool_length,tool_width],[tool_angle],
+    free_region = find_tool_placements(mask,[tool_width,tool_length],[tool_angle],
                                        search_region_pix,
                                        MIN_CLEARANCE_PX = min_distance_threshold)
-    
-    
     
     if isinstance(free_region, list) or not free_region:
         # No sufficient free space exists
         print(f"Wall {wall.label}: No sufficient free space found, using fallback")
         return True, {"use_fallback": True, "wall": wall}
-    
-    # Find the largest contiguous free region and return the t-value that maximizes minimal distance
-    # best_region = max(free_regions, key=lambda r: r["min_distance"])
-    
-    print(f"Wall {wall.label}: Found free region at pos_px={free_region['pos_px']}")
-
-
-    return True, {
-        "use_fallback": False,
-        "wall": wall,
-        "pos_px": free_region["pos_px"],
-        "angle": free_region["angle"],
-        "min_distance": free_region["clearance_px"]
-    }
+    else:
+        # Find the largest contiguous free region and return the t-value that maximizes minimal distance
+        # best_region = max(free_regions, key=lambda r: r["min_distance"])
+        
+        print(f"Wall {wall.label}: Found free region at pos_px={free_region['pos_px']}")
+        
+        return True, {
+            "use_fallback": False,
+            "wall": wall,
+            "pos_px": free_region["pos_px"],
+            "angle": free_region["angle"],
+            "min_distance": free_region["clearance_px"]
+        }
 
 
 if __name__ == "__main__":
-    # create and save matrices H and Hinv based on some manual data for robot to pix homography
-    points_rob = np.array([[0.21,0.95],
-                  [0.83,0.94],
-                  [0.2,0.04],
-                  [0.83,0.04] 
-                  ])
-    points_pix = np.array([[62,4],
-                  [301,4],
-                  [62,350],
-                  [301,350] 
-                  ])
-    H,_ = cv2.findHomography(points_pix, points_rob)
-    np.savez("homography.npz", H)
+    # # create and save matrices H and Hinv based on some manual data for robot to pix homography
+    # points_rob = np.array([[0.21,0.95],
+    #               [0.83,0.94],
+    #               [0.2,0.04],
+    #               [0.83,0.04] 
+    #               ])
+    # points_pix = np.array([[62,4],
+    #               [301,4],
+    #               [62,350],
+    #               [301,350] 
+    #               ])
+    # H,_ = cv2.findHomography(points_pix, points_rob)
+    # np.savez("homography.npz", H)
+    center = [0.5, 0.49]
+    size = [0.94, 0.955]
+    mask = cv2.imread("mask_98.jpeg", cv2.IMREAD_GRAYSCALE)
+    cv2.imshow("mask", mask)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    walls = build_fence_walls(
+            fence_center=center,
+            fence_size=size,
+            tool_length=0.36,
+            tool_width=0.017,
+            safety_margin=0.01
+        )
+    wall = walls[2] # bottom wall
+    print(wall)
+    image_space_tool_dimensions = [8,120] 
+    flag, details = check_wall_reset_needed(mask, wall, image_space_tool_dimensions, min_granule_size=400)
+    print(flag, details)
+    
 

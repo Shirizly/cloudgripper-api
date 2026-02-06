@@ -80,15 +80,17 @@ class Recorder:
         self.video_writer_bottom: Optional[cv2.VideoWriter] = None
         self.disk_enabled = False # no saving images/videos on startup, not advancing counters
 
+        
+
 
 
     def _initialize_directories(self) -> None:
         logger.info(f"_initialize_directories called. save_images_individually={self.save_images_individually}")
         if self.save_images_individually:
-            self.output_images_dir, self.output_bottom_images_dir = (
+            self.output_images_dir, self.output_bottom_images_dir, self.output_mask_dir = (
                 FileManager.create_image_dirs(self.output_dir)
             )
-            logger.info(f"Created image directories: {self.output_images_dir}, {self.output_bottom_images_dir}")
+            logger.info(f"Created image directories: {self.output_images_dir}, {self.output_bottom_images_dir}, {self.output_mask_dir}")
         else:
             self.output_video_dir, self.output_bottom_video_dir = (
                 FileManager.create_video_dirs(self.output_dir)
@@ -184,13 +186,18 @@ class Recorder:
         try:
             if not self.ensure_images():
                 return
+            bottom_image_raw = None
+            mask = None
             with self.image_lock:
                 top_image = self.image_top.copy()
                 bottom_image = self.bottom_image.copy()
                 if self.bottom_image_raw is not None:
                     bottom_image_raw = self.bottom_image_raw.copy()
+                if self.shared_state.latest_mask is not None and not self.shared_state.latest_mask_saved:
+                    mask = self.shared_state.latest_mask
+                    self.shared_state.latest_mask_saved = True
             if self.save_images_individually:
-                self._save_individual_images(top_image, bottom_image, bottom_image_raw)
+                self._save_individual_images(top_image, bottom_image, bottom_image_raw,mask)
             else:
                 with self.writer_lock:
                     if (
@@ -211,7 +218,7 @@ class Recorder:
                         self.snapshot_cond.notify_all()
 
     def _save_individual_images(
-        self, top_image: np.ndarray, bottom_image: np.ndarray, bottom_image_raw: np.ndarray = None) -> None:
+        self, top_image: np.ndarray, bottom_image: np.ndarray, bottom_image_raw: np.ndarray = None, mask: np.ndarray = None) -> None:
         """Save the top and bottom images as individual JPEG files."""
         try:
             top_filename = os.path.join(
@@ -227,6 +234,11 @@ class Recorder:
                 cv2.imwrite(bottom_raw_filename, bottom_image_raw)
             cv2.imwrite(top_filename, top_image)
             cv2.imwrite(bottom_filename, bottom_image)
+            if mask is not None:
+                mask_filename = os.path.join(
+                    self.output_mask_dir, f"mask_{self.frame_counter}.jpeg"
+                )
+                cv2.imwrite(mask_filename, mask)
         except Exception as e:
             logger.exception("Error saving individual images:", e)
 
@@ -268,6 +280,11 @@ class Recorder:
             logger.error(f"Exception in start_new_recording: {e}", exc_info=True)
             raise
 
+    def disable_recording(self) -> None:
+        """Disable disk saving without starting a new recording session."""
+        self.disk_enabled = False
+        logger.info("Disk saving disabled")
+
     def _prepare_new_recording(self) -> None:
         """Prepare for a new recording session."""
         self.stop_flag = False
@@ -288,6 +305,7 @@ class Recorder:
             if not isinstance(state, dict):
                 state = {"state": state}
             state["time"] = timestamp
+            state["frame_index"] = self.frame_counter
 
             state_file = os.path.join(self.output_dir, "states.json")
             data: List[Dict[str, Any]] = []
