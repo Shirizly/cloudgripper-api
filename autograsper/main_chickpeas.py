@@ -7,13 +7,13 @@ import logging
 import os
 
 from flask import Flask, Response
+from werkzeug.serving import make_server
 
 from coordinator import DataCollectionCoordinator
-from custom_graspers.random_push_grasper import RandomPushGrasper
+from autograsper.custom_graspers.granular_pusher import RandomPushGrasper
 from utils import load_config
 
 
-import sys
 import traceback
 
 def thread_exception_handler(args):
@@ -49,6 +49,7 @@ def generate_frames():
     Generator function that continuously retrieves image frames from the
     coordinator's UI update queue, encodes them as JPEG, and yields them.
     """
+    assert global_coordinator is not None, "Global coordinator must be initialized before starting the Flask app."
     while not global_coordinator.shutdown_event.is_set():
         ui_msg = global_coordinator.get_ui_update(timeout=0.1)
         if ui_msg and ui_msg.get("type") == "image_update":
@@ -75,7 +76,8 @@ def main():
     config = load_config(config_path)
     shutdown_event = threading.Event()
     grasper = RandomPushGrasper(config, shutdown_event=shutdown_event, N_pushes=10)
-    global_coordinator = DataCollectionCoordinator(config, grasper, shutdown_event, visualize=False)
+    # time.sleep(100)
+    global_coordinator = DataCollectionCoordinator(config, grasper, shutdown_event, visualize=True)
     global_coordinator.start()
 
     try:

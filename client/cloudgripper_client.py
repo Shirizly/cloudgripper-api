@@ -117,12 +117,12 @@ class GripperRobot:
         response = self._make_request("moveRight")
         return self._safe_get(response, "time")
 
-    def move_gripper(self, angle: int) -> Optional[str]:
+    def move_gripper(self, angle: float) -> Optional[str]:
         """
         Move the robot's gripper to a specified angle.
 
         Args:
-            angle (int): The angle to move the gripper to.
+            angle (actually opening) (float): The point to set the gripper opening to between 0 (closed) and 1 (fully open).
 
         Returns:
             Optional[str]: The time taken for the movement.
@@ -162,12 +162,12 @@ class GripperRobot:
         response = self._make_request(f"rotate/{angle}")
         return self._safe_get(response, "time")
 
-    def move_z(self, z: int) -> Optional[str]:
+    def move_z(self, z: float) -> Optional[str]:
         """
         Move the robot along the Z-axis.
 
         Args:
-            z (int): The distance to move along the Z-axis.
+            z (float): The distance to move along the Z-axis.
 
         Returns:
             Optional[str]: The time taken for the movement.
@@ -175,13 +175,13 @@ class GripperRobot:
         response = self._make_request(f"up_down/{z}")
         return self._safe_get(response, "time")
 
-    def move_xy(self, x: int, y: int) -> Optional[str]:
+    def move_xy(self, x: float, y: float) -> Optional[str]:
         """
         Move the robot along the X and Y axes.
 
         Args:
-            x (int): The distance to move along the X-axis.
-            y (int): The distance to move along the Y-axis.
+            x (float): The distance to move along the X-axis.
+            y (float): The distance to move along the Y-axis.
 
         Returns:
             Optional[str]: The time taken for the movement.

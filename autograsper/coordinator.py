@@ -12,8 +12,10 @@ import cv2
 
 from grasper import RobotActivity, AutograsperBase
 from image_collector.cv2displayer import update_images
-from recording import Recorder
 from file_manager import FileManager
+from action_tracker import ActionTracker
+from recording import Recorder
+from recording_seg import Recorder as SegRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,9 @@ logger = logging.getLogger(__name__)
 class SharedState:
     """
     Holds shared references between threads.
+    
+    Includes action tracking for recording robot movements and actions
+    alongside captured frames and states.
     """
     state = RobotActivity.STARTUP
     latest_top_image: np.ndarray | None = None
@@ -31,6 +36,13 @@ class SharedState:
     latest_mask_saved: bool = False
     timestamp: float | None = None
     image_lock: threading.RLock = field(default_factory=threading.RLock)
+    
+    # Action tracking
+    action_tracker: ActionTracker = field(default_factory=ActionTracker)
+    
+    # Frame index synchronization for precise action boundaries
+    frame_index: int = 0
+    frame_index_lock: threading.RLock = field(default_factory=threading.RLock)
 
 
 class DataCollectionCoordinator:
@@ -40,11 +52,12 @@ class DataCollectionCoordinator:
     """
 
     def __init__(
-        self, config, grasper: AutograsperBase, shutdown_event: threading.Event, visualize: bool = False):
+        self, config, grasper: AutograsperBase, shutdown_event: threading.Event, visualize: bool = False, segmenter=None):
         self.config = config
         self.shutdown_event = shutdown_event
         self.shared_state = SharedState()
         self.recorder = None
+        self.segmenter = segmenter            
         self.autograsper = grasper
         self.autograsper.connect_shared_state(self.shared_state)
         self.visualize = visualize
@@ -177,6 +190,9 @@ class DataCollectionCoordinator:
             self.recorder.pause = True
             time.sleep(self.timeout_between_experiments)
             self.recorder.pause = False
+        if old_state == RobotActivity.RESETTING:
+            if self.recorder:
+                self.recorder.save_action_summary()
 
     def _create_new_data_point(self):
         base_dir = os.path.join(
@@ -228,9 +244,14 @@ class DataCollectionCoordinator:
             logger.info(f"Recorder already exists, not recreating")
 
     def _setup_recorder(self, output_dir: str):
-        return Recorder(
+        if self.segmenter:
+            return SegRecorder(
+                self.config, output_dir=output_dir, shutdown_event=self.shutdown_event, shared_state=self.shared_state, segmenter=self.segmenter
+            )
+        else:
+            return Recorder(
             self.config, output_dir=output_dir, shutdown_event=self.shutdown_event, shared_state=self.shared_state
-        )
+            )
 
     def _on_resetting_state(self):
         status = "fail" if self.autograsper.failed else "success"

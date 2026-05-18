@@ -156,7 +156,8 @@ def clean_occupancy_mask(mask: np.ndarray, kernel_size: int = 3, min_size: int =
         if area < (width * height) * 0.25 and area < min_size * 2:
             closed[labels == i] = 0  # Remove sparse regions
         # print(area,centroids[i], width, height, area / (width * height))
-
+    
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(closed, connectivity=8)
 
     return closed, num_labels-1, stats, centroids
 
@@ -263,8 +264,8 @@ def process_image(image: np.ndarray, reference_empty: np.ndarray,
     # cv2.imwrite("cropped_image.png", cropped_image)
     # cv2.imwrite("cropped_reference.png", cropped_reference)
     # mask = create_occupancy_mask(cropped_image, cropped_reference)
-    mask = create_chickpea_mask(cropped_image)
-    masked_image = cv2.bitwise_and(cropped_image, cropped_image, mask=mask)
+    # mask = create_chickpea_mask(cropped_image)
+    masked_image = cropped_image #cv2.bitwise_and(cropped_image, cropped_image, mask=mask)
     mask = create_occupancy_mask(masked_image, cropped_reference)
     # cv2.imwrite("raw_mask.png", mask)
     clean_mask, num_labels, stats, centroids = clean_occupancy_mask(mask, min_size=min_size)

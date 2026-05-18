@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import logging
+import time
 from typing import Any, Tuple, List, Dict, Optional
 import cv2
 import numpy as np
@@ -29,6 +30,8 @@ class Recorder:
         try:
             camera_config = config["camera"]
             experiment_config = config["experiment"]
+            robot_config = config["robot"]
+            self.angle_bias = robot_config.get(experiment_config["robot_idx"], {}).get("rotation_bias", 0)
             self.camera_matrix = np.array(camera_config["m"])
             self.distortion_coeffs = np.array(camera_config["d"])
             print("Camera Matrix:", self.camera_matrix)
@@ -125,17 +128,24 @@ class Recorder:
         """Record video or images. Image display is handled externally."""
         self._prepare_new_recording()
         try:
+            frame_start: float = time.perf_counter()
             while not self.stop_flag and not self.shutdown_event.is_set():
+                inbetween_time = time.perf_counter() - frame_start
+                frame_start = time.perf_counter()
                 if not self.pause:
                     self._update()
-                    if not self.ensure_images():
+                    api_time = time.perf_counter() - frame_start
+                    while not self.ensure_images():
                         # Wait briefly for images to become available.
-                        self.shutdown_event.wait(1 / self.FPS)
-                        continue
-
+                        self.shutdown_event.wait(0.1 / self.FPS)
+                        if time.perf_counter() - frame_start > 1/self.FPS:  # If images aren't available after 1/FPS seconds, log a warning and skip this frame.
+                            logger.warning("Images not available after 1/FPS-rate seconds, skipping frame.")
+                            break
+                    api_time2 = time.perf_counter() - frame_start # total time including ensure_images
                     if (not self.record_only_after_action) or (self.take_snapshot > 0):
                         if self.save_data and self.disk_enabled:
                             self._capture_frame()
+                        capture_time = time.perf_counter() - frame_start - api_time2 # time spent on capture after ensuring images
                         if (
                             self.clip_length
                             and (self.frame_counter % self.clip_length == 0)
@@ -145,14 +155,16 @@ class Recorder:
                             self.video_counter += 1
                             self._start_or_restart_video_writers()
                         # Use shutdown_event.wait to allow prompt shutdown.
-                        self.shutdown_event.wait(1 / self.FPS)
+                        self.shutdown_event.wait(max(0, 1 / self.FPS - (time.perf_counter() - frame_start)-0.0002)) # subtract small buffer time to improve chances of hitting target FPS
                         if self.save_data and self.disk_enabled:
                             self.save_state()
                         self.frame_counter += 1
                     else:
-                        self.shutdown_event.wait(1 / self.FPS)
+                        self.shutdown_event.wait(max(0, 1 / self.FPS - (time.perf_counter() - frame_start)-0.0002))
                 else:
-                    self.shutdown_event.wait(1 / self.FPS)
+                    self.shutdown_event.wait(max(0, 1 / self.FPS - (time.perf_counter() - frame_start)-0.0002))
+                final_time = time.perf_counter() - frame_start
+                # print(f"Recorder frame time: total={final_time:.4f}s, api={api_time:.4f}s, capture={capture_time if 'capture_time' in locals() else 0:.4f}s, inbetween={inbetween_time:.4f}s")
         except Exception as e:
             logger.exception("An error occurred in Recorder.record:", e)
             self.shutdown_event.set()
@@ -171,12 +183,16 @@ class Recorder:
                     data[1], self.camera_matrix, self.distortion_coeffs, self.H_matrix
                 )
             self.state = data[2]
+            if self.state is not None and isinstance(self.state, dict) and "rotation" in self.state:
+                self.state['rotation'] -= self.angle_bias # apply rotation bias to recorded state for better alignment with actual gripper pose
+                self.state['rotation'] = self.state['rotation'] % 180 # ensure rotation stays within [0, 180) range after bias correction
             self.timestamp = data[3]
             with self.shared_state.image_lock:
                 self.shared_state.latest_top_image = self.image_top
                 self.shared_state.latest_bottom_image = self.bottom_image
-                self.shared_state.latest_robot_state = data[2]
+                self.shared_state.latest_robot_state = self.state
                 self.shared_state.timestamp = data[3]
+            # print(f"latest robot state is: {data[2]}")
         except Exception as e:
             logger.exception("Error updating images/state:", e)
             raise
@@ -186,6 +202,12 @@ class Recorder:
         try:
             if not self.ensure_images():
                 return
+            
+            # Update shared state with current frame index
+            # This synchronizes the grasper with the recorder for precise action boundaries
+            with self.shared_state.frame_index_lock:
+                self.shared_state.frame_index = self.frame_counter
+            
             bottom_image_raw = None
             mask = None
             with self.image_lock:
@@ -260,6 +282,10 @@ class Recorder:
             if self.video_writer_bottom:
                 self.video_writer_bottom.release()
                 self.video_writer_bottom = None
+        
+        # Save action summary when recording ends
+        if self.disk_enabled:
+            self.save_action_summary()
 
     def start_new_recording(self, new_output_dir: str) -> None:
         """Start a new recording session in the specified directory."""
@@ -272,6 +298,8 @@ class Recorder:
             self.disk_enabled = True
             self.frame_counter = 0
             self.video_counter = 0
+            # Clear action tracker for new session to ensure actions.json only contains actions from this session
+            self.shared_state.action_tracker.clear()
             logger.info(f"disk_enabled set to True. Calling _initialize_directories()")
             self._initialize_directories()
             self._prepare_new_recording()
@@ -282,6 +310,9 @@ class Recorder:
 
     def disable_recording(self) -> None:
         """Disable disk saving without starting a new recording session."""
+        if self.disk_enabled:
+            # Save action summary before disabling
+            self.save_action_summary()
         self.disk_enabled = False
         logger.info("Disk saving disabled")
 
@@ -292,12 +323,24 @@ class Recorder:
             self._start_or_restart_video_writers()
 
     def stop(self) -> None:
-        """Stop the recorder."""
+        """Stop the recorder and save action summary."""
+        if self.disk_enabled:
+            # Save action summary before stopping
+            self.save_action_summary()
+            self.disk_enabled = False
         self.stop_flag = True
         logger.info("Stop flag set to True in Recorder")
 
     def save_state(self) -> None:
-        """Save the current state to a JSON file."""
+        """
+        Save the current state to a JSON file, including action metadata if available.
+        
+        Each frame entry includes:
+        - Robot state
+        - Timestamp
+        - Frame index
+        - Associated action information (if any)
+        """
         try:
             state = self.state.copy() if isinstance(self.state, dict) else self.state
             timestamp = self.timestamp
@@ -306,6 +349,19 @@ class Recorder:
                 state = {"state": state}
             state["time"] = timestamp
             state["frame_index"] = self.frame_counter
+
+            # Add action metadata if available
+            action = self.shared_state.action_tracker.get_action_for_frame(self.frame_counter)
+            if action is not None:
+                state["action"] = {
+                    "action_id": action.action_id,
+                    "action_type": action.action_type.value,
+                    "phase": action.phase.value,
+                    "start_frame": action.start_frame,
+                    "is_planar_2d": action.is_planar_2d,
+                    "action_details": action.action_details,
+                    "description": action.description,
+                }
 
             state_file = os.path.join(self.output_dir, "states.json")
             data: List[Dict[str, Any]] = []
@@ -317,6 +373,31 @@ class Recorder:
                 json.dump(data, file, indent=4)
         except Exception as e:
             logger.exception("Error saving state:", e)
+
+    def save_action_summary(self) -> None:
+        """
+        Save action summary to a separate JSON file.
+        
+        This provides a high-level overview of all actions performed during recording,
+        useful for dataset creation and analysis.
+        """
+        try:
+            actions = self.shared_state.action_tracker.get_all_actions()
+            action_data = {
+                "total_actions": len(actions),
+                "actions": [action.to_dict() for action in actions],
+            }
+            action_file = os.path.join(self.output_dir, "actions.json")
+            if len(actions) == 0:
+                return # either no actions to save or actions were saved and cleared already, so skip saving empty file
+            with open(action_file, "w") as f:
+                json.dump(action_data, f, indent=4)
+            logger.info(
+                f"Saved {len(actions)} actions to {action_file}"
+            )
+        except Exception as e:
+            logger.exception("Error saving action summary:", e)
+
 
     def ensure_images(self) -> bool:
         """Ensure that valid images are available. Try updating if not."""

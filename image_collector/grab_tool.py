@@ -117,18 +117,20 @@ time.sleep(1)
 state = robot.get_state()
 current_config = list(state[0].values())[:5]  # x, y, z, rotation, gripper
 print(f"Current configuration: {[ '%.2f' % elem for elem in current_config]}\n", flush=True)
+robot_bias = {"robot24": 5.0, "robot15": -10.0}
 
-def perform_grab_tool(robot: GripperRobot, check_tool_grasp=False) -> float:
+
+def perform_grab_tool(robot: GripperRobot, check_tool_grasp=False,bias = 0.0) -> float:
     robot.move_z(1.0)
     time.sleep(1.0)
     robot.gripper_open()
     time.sleep(1.0)
-    robot.rotate(0)
+    robot.rotate(bias)
     time.sleep(1.0)
     print("Moving to tool position...", flush=True)
-    robot.move_xy(0.03, 0.49)
+    robot.move_xy(0.033, 0.461)
     time.sleep(1)
-    robot.move_z(0.27)
+    robot.move_z(0.277)
     time.sleep(1)
     robot.gripper_close()
 
@@ -168,7 +170,7 @@ try:
     time.sleep(1)
     camera_thread = threading.Thread(target=update_camera, daemon=True)
     camera_thread.start()
-    grip_quality = perform_grab_tool(robot, check_tool_grasp=True)
+    grip_quality = perform_grab_tool(robot, check_tool_grasp=True, bias=robot_bias.get(robotName, 0.0))
     print(f"Tool grip quality: {grip_quality:.2f}")
     threshold = 0.55
     
