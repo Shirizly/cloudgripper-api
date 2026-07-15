@@ -86,6 +86,7 @@ class ChickpeaSegmenter:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
+            print(f"Using device: {self.device}")
         
         # Load model (YOLO auto-detects architecture from weights)
         self.model = YOLO(str(self.weights_path))

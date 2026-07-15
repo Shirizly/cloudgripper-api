@@ -33,7 +33,7 @@ from autograsper.library.utils import get_undistorted_bottom_image
 from object_tracker.granular_utils import process_image, crop_center_region
 from object_tracker.base_tool_tracker import find_thin_tool_center
 from autograsper.custom_graspers.fence_utils import PixelRobotTransform
-from sklearn.mixture import GaussianMixture
+# from sklearn.mixture import GaussianMixture
 
 # Load environment variables
 load_dotenv()
