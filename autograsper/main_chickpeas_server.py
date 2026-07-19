@@ -11,7 +11,7 @@ from flask import Flask, Response
 from werkzeug.serving import make_server
 
 from coordinator import DataCollectionCoordinator
-from autograsper.custom_graspers.granular_pusher import GranularPusher
+from autograsper.custom_graspers.granular_pusher import RandomPushGrasper
 from autograsper.custom_graspers.segmenting_granular_pusher import SegGranularPusher
 from utils import load_config
 
